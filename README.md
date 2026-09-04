@@ -33,6 +33,24 @@ git clone https://github.com/JorgeCarvalhoPT/nullbox && cd nullbox && make insta
 
 Then run **`nullbox`** to launch the terminal UI. (`nullbox version` prints the build.)
 
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JorgeCarvalhoPT/nullbox/main/uninstall.sh | sh
+```
+
+This removes the binary but **keeps your engagement records and evidence** —
+for a pentest, that in-scope proof is worth holding on to. Add `--purge` to
+also delete the state directory (`<config>/nullbox`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JorgeCarvalhoPT/nullbox/main/uninstall.sh | sh -s -- --purge --yes
+```
+
+If you installed with Homebrew, use `brew uninstall --cask nullbox` instead; with
+Go, `make uninstall`. Stop any running sandboxes (`nullbox down <name>`) first —
+uninstalling doesn't tear down live microVMs.
+
 > Releases: `git tag vX.Y.Z && git push --tags` runs the GoReleaser workflow,
 > which builds the binaries and updates the Homebrew tap. First-time setup:
 > create a `JorgeCarvalhoPT/homebrew-tap` repo and add a `HOMEBREW_TAP_TOKEN`
