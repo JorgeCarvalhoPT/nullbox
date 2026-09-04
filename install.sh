@@ -39,6 +39,7 @@ trap 'rm -rf "$tmp"' EXIT
 echo "nullbox: downloading $tag ($os/$arch)…"
 curl -fsSL "$url" | tar -xz -C "$tmp"
 
+[ -d "$BINDIR" ] || mkdir -p "$BINDIR" 2>/dev/null || true
 if [ -w "$BINDIR" ]; then
   install -m 0755 "$tmp/nullbox" "$BINDIR/nullbox"
 else
