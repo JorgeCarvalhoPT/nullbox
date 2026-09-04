@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <style>
-  /* Tokyo-Night terminal aesthetic, matching the sbx TUI. Day palette on bare
+  /* Tokyo-Night terminal aesthetic. Day palette on bare
      :root; Night palette under dark OS pref and the [data-theme] toggle. */
   :root{
     --page:#c6cadb; --win:#e1e2e7; --card:#d8dae2; --card2:#cfd1db;
@@ -209,7 +209,7 @@
     return {ts:new Date(),proto,dst,dport,verdict:drop?"drop":"accept",
       note:drop?(dst==="169.254.169.254"?"metadata":"out of scope"):""};
   }
-  // aggregate feed by destination -> the "log" rows (host + hits + status), like sbx
+  // aggregate feed by destination -> the "log" rows (host + hits + status)
   function aggregate(name){
     const m=new Map();
     (feeds[name]||[]).forEach(ev=>{

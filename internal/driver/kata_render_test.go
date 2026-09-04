@@ -17,7 +17,7 @@ func renderScope(t *testing.T, allow, deny []model.Target, resolved map[string][
 			Scope:   model.Scope{Allow: allow, Deny: deny},
 		},
 	}
-	b, err := renderManifests(UpSpec{Engagement: e, ImageRef: "nullbox/smith:full"}, resolved)
+	b, err := renderManifests(UpSpec{Engagement: e, ImageRef: "nullbox/guest:full"}, resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestRenderPodAndPolicyShape(t *testing.T) {
 	m := renderScope(t, []model.Target{{CIDR: "203.0.113.0/24"}}, nil, nil)
 	for _, want := range []string{
 		"kind: Namespace", "kind: Pod", "kind: NetworkPolicy",
-		"runtimeClassName: kata", "image: nullbox/smith:full",
+		"runtimeClassName: kata", "image: nullbox/guest:full",
 		"NET_ADMIN", "NET_RAW", "mountPath: /var/lib/docker", "emptyDir:",
 		"policyTypes:", "- Egress", "cidr: 203.0.113.0/24",
 		"nbx-acme", // namespace

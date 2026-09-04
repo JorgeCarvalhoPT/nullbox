@@ -64,7 +64,11 @@ type Authorization struct {
 }
 
 type Spec struct {
-	Driver Driver `yaml:"driver,omitempty"` // optional pin; empty => auto
+	// Template names a saved config preset whose defaults fill the fields this
+	// manifest leaves unset (driver, image, network, capabilities, evidence).
+	// Scope, window, and authorization stay per-engagement. Resolved at load.
+	Template string `yaml:"template,omitempty"`
+	Driver   Driver `yaml:"driver,omitempty"` // optional pin; empty => auto
 	// Image is the guest OCI image — ANY AI pentesting agent. nullbox is
 	// agent-agnostic: the sandbox does not care what runs inside. Empty => a
 	// built-in default guest chosen from Capabilities.InfraTools.

@@ -114,6 +114,36 @@ keys):
   is restricted to those ports and is *not* also opened for all ports.
 - `169.254.169.254` + link-local are denied by default (`denyMetadata`), so
   offensive tooling can't reach host/cloud credentials.
+- `spec.image` names the guest — **any** AI pentesting agent's OCI image. The
+  sandbox treats the agent as a black box; scope is enforced around it, not
+  inside it.
+
+## Templates (reusable config)
+
+Scope, window, and authorization are per-engagement, but the *setup* — driver,
+guest image, network profile, capabilities, evidence retention — is usually the
+same across a client or team. Save it once as a template and reference it:
+
+```bash
+# save a preset from an existing manifest (captures the config, not the scope)
+nullbox template save acme-standard examples/acme-internal.yaml
+nullbox template list
+nullbox template show acme-standard
+```
+
+Then an engagement states only what's unique to it and inherits the rest:
+
+```yaml
+spec:
+  template: acme-standard        # driver, image, network, capabilities, evidence
+  window: { end: "2026-09-29T23:59:59Z" }
+  scope: { allow: [ { cidr: 10.10.0.0/16 } ] }
+```
+
+The manifest always wins where it sets a value; the template only fills the
+fields left unset. Templates live under `NULLBOX_TEMPLATES` (default
+`<user-config>/nullbox/templates`). See `examples/templates/` and
+`examples/acme-templated.yaml`.
 
 ## Network profiles
 

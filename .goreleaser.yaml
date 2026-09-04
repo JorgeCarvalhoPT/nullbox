@@ -1,11 +1,11 @@
 # GoReleaser — builds cross-platform binaries and publishes a Homebrew formula,
-# so `brew install <owner>/tap/nullbox` works just like `brew install docker/tap/sbx`.
+# so `brew install <owner>/tap/nullbox` works from a Homebrew tap.
 #
 # Cut a release:  git tag v0.1.0 && git push origin v0.1.0
 # The release workflow (.github/workflows/release.yml) runs `goreleaser release`.
 #
-# ── BEFORE FIRST RELEASE, replace `null` below with your GitHub owner, and
-#    create an (empty) tap repo named `homebrew-tap` under that owner. ──
+# ── BEFORE FIRST RELEASE: create an (empty) tap repo named `homebrew-tap`
+#    under the owner below and add a HOMEBREW_TAP_TOKEN secret. ──
 version: 2
 
 project_name: nullbox

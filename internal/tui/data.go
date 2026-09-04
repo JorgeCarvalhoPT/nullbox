@@ -106,7 +106,7 @@ type aggRow struct {
 }
 
 // aggregate collapses the event feed into one row per destination:port with a
-// hit count — the "log" view, matching the sbx Network Log.
+// hit count — the egress "log" view.
 func aggregate(e engagement) []aggRow {
 	byKey := map[string]*aggRow{}
 	var order []string

@@ -1,5 +1,5 @@
-// Package console is nullbox's operator UI — the sbx-dashboard equivalent, but
-// for the containment layer sbx never surfaced: which engagements are live,
+// Package console is nullbox's operator UI for the containment layer: which
+// engagements are live,
 // their authorized scope, a running feed of in-scope vs out-of-scope egress,
 // the window countdown to auto-expiry, and a per-engagement kill switch.
 //

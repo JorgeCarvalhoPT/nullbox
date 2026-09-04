@@ -33,7 +33,9 @@ import (
 	"github.com/JorgeCarvalhoPT/nullbox/internal/nflog"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/policy"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/store"
+	"github.com/JorgeCarvalhoPT/nullbox/internal/template"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/tui"
+	"gopkg.in/yaml.v3"
 )
 
 const usage = `nullbox — a sandbox for AI pentesting agents (scope as code)
@@ -50,12 +52,13 @@ usage: nullbox [command] [args]
   down     <name>       stop + remove the sandbox
   list                  show known engagements
   console  [--addr]     serve the web console (default 127.0.0.1:7788)
+  template <sub>        config presets: list | show <name> | save <name> <manifest>
   version               print the version
 `
 
 func main() {
 	if len(os.Args) < 2 {
-		// Bare `nullbox` launches the in-terminal interface, like sbx.
+		// Bare `nullbox` launches the in-terminal interface.
 		if err := tui.Run(); err != nil {
 			fmt.Fprintln(os.Stderr, "nullbox: "+err.Error())
 			os.Exit(1)
@@ -82,6 +85,8 @@ func main() {
 		err = cmdList(os.Args[2:])
 	case "console":
 		err = cmdConsole(os.Args[2:])
+	case "template":
+		err = cmdTemplate(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println("nullbox " + buildinfo.Version)
 		return
@@ -322,6 +327,56 @@ func cmdConsole(args []string) error {
 	srv := console.New(feed)
 	fmt.Printf("nullbox console → http://%s\n", *addr)
 	return http.ListenAndServe(*addr, srv.Handler())
+}
+
+func cmdTemplate(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: nullbox template <list|show|save> ...")
+	}
+	switch args[0] {
+	case "list":
+		names, err := template.List()
+		if err != nil {
+			return err
+		}
+		if len(names) == 0 {
+			fmt.Println("no templates (create one with `nullbox template save <name> <manifest>`)")
+			return nil
+		}
+		for _, n := range names {
+			fmt.Println(n)
+		}
+		return nil
+	case "show":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: nullbox template show <name>")
+		}
+		t, err := template.Load(args[1])
+		if err != nil {
+			return err
+		}
+		b, err := yaml.Marshal(t)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(b))
+		return nil
+	case "save":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: nullbox template save <name> <manifest>")
+		}
+		e, err := manifest.Load(args[2])
+		if err != nil {
+			return err
+		}
+		if err := template.Save(template.FromSpec(args[1], e.Spec)); err != nil {
+			return err
+		}
+		fmt.Printf("saved template %q (from %s)\n", args[1], args[2])
+		return nil
+	default:
+		return fmt.Errorf("unknown template subcommand %q (list|show|save)", args[0])
+	}
 }
 
 // runningEngagementName returns the name events are stamped with — the single

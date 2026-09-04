@@ -1,4 +1,4 @@
-// Package tui is nullbox's in-terminal interface — the sbx-equivalent, built on
+// Package tui is nullbox's in-terminal interface, built on
 // the same stack (charmbracelet/bubbletea + lipgloss). It lives in the terminal:
 // `nullbox` with no arguments launches it. Left column lists engagements; the
 // right pane shows the live egress log (allowed vs dropped) and the compiled

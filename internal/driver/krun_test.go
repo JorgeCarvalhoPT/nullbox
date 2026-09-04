@@ -13,8 +13,8 @@ import (
 )
 
 func TestKrunCreateArgs(t *testing.T) {
-	got := krunCreateArgs("nbx-acme", "nullbox/smith:thin", "/ws", "/cfg", 7788, 2, 2048)
-	want := "create --name nbx-acme --cpus 2 --mem 2048 --volume /cfg:/etc/nullbox --volume /ws:/workspace --workdir /workspace --port 7788:7788 nullbox/smith:thin"
+	got := krunCreateArgs("nbx-acme", "nullbox/guest:thin", "/ws", "/cfg", 7788, 2, 2048)
+	want := "create --name nbx-acme --cpus 2 --mem 2048 --volume /cfg:/etc/nullbox --volume /ws:/workspace --workdir /workspace --port 7788:7788 nullbox/guest:thin"
 	if strings.Join(got, " ") != want {
 		t.Errorf("createArgs =\n %q\nwant\n %q", strings.Join(got, " "), want)
 	}
@@ -90,7 +90,7 @@ func TestKrunUpThroughSeams(t *testing.T) {
 		},
 	}
 	rs, _ := policy.Compile(e)
-	st, err := d.Up(UpSpec{Engagement: e, Ruleset: rs, ImageRef: "nullbox/smith:thin"})
+	st, err := d.Up(UpSpec{Engagement: e, Ruleset: rs, ImageRef: "nullbox/guest:thin"})
 	if err != nil {
 		t.Fatalf("Up: %v", err)
 	}

@@ -1,0 +1,21 @@
+# An engagement that inherits its setup from the `acme-standard` template, so it
+# only has to state what is unique to this engagement: scope, window, auth.
+#   NULLBOX_TEMPLATES=examples/templates nullbox validate examples/acme-templated.yaml
+apiVersion: nullbox/v1
+kind: Engagement
+metadata:
+  name: acme-q1
+  client: ACME Corp
+  authorization:
+    ref: SOW-2026-0142
+spec:
+  template: acme-standard   # driver, image, network, capabilities, evidence
+  window:
+    end: "2026-09-29T23:59:59Z"
+  scope:
+    allow:
+      - cidr: 10.10.0.0/16
+      - cidr: 10.20.5.0/24
+        ports: [443, 8443]
+    deny:
+      - cidr: 10.10.9.0/24
