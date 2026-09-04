@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/JorgeCarvalhoPT/nullbox/internal/buildinfo"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/console"
@@ -42,6 +43,7 @@ usage: nullbox [command] [args]
        nullbox                 launch the in-terminal interface (TUI)
 
   tui                   launch the in-terminal interface explicitly
+  run      [flags]      create + boot a sandbox in one line: --name --auth --allow …
   validate <manifest>   parse + validate a manifest, print a summary
   render   <manifest>   compile a manifest to its nftables egress policy (stdout)
   up       <manifest>   provision + start the engagement sandbox (records it)
@@ -67,6 +69,8 @@ func main() {
 	switch os.Args[1] {
 	case "tui":
 		err = tui.Run()
+	case "run":
+		err = cmdRun(os.Args[2:])
 	case "validate":
 		err = cmdValidate(os.Args[2:])
 	case "render":
@@ -317,4 +321,94 @@ func runningEngagementName() string {
 		}
 	}
 	return ""
+}
+
+// cmdRun is the one-liner: build an engagement from flags, optionally inherit a
+// template, validate, optionally write a manifest, and boot it — the imperative
+// twin of `nullbox up <manifest>` for when you don't want to hand-write YAML.
+//
+//	nullbox run --name acme --auth SOW-2026-0142 --allow "10.10.0.0/16 app.example.com:443"
+func cmdRun(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	name := fs.String("name", "", "engagement name, a DNS label (required)")
+	auth := fs.String("auth", "", "authorization reference, e.g. SOW-2026-0142 (required)")
+	allow := fs.String("allow", "", "in-scope targets, space-separated: CIDR|host[:port,port] (required)")
+	deny := fs.String("deny", "", "out-of-scope carve-outs, space-separated")
+	image := fs.String("image", "", "guest OCI image — any AI pentesting agent (default: built-in guest)")
+	tmpl := fs.String("template", "", "config preset to inherit (see `nullbox template list`)")
+	drv := fs.String("driver", "", "krun|firecracker|clh|kata (default: auto-select for this host)")
+	profile := fs.String("profile", "nat", "network profile: nat|routed|l2")
+	client := fs.String("client", "", "client label, for the record")
+	days := fs.Int("days", 14, "engagement window length in days (from now)")
+	until := fs.String("until", "", "window end as RFC3339 (overrides --days)")
+	infra := fs.Bool("infra", false, "request the full (infra tools) guest variant")
+	workspace := fs.String("workspace", "", "host path mounted read-only as the target codebase")
+	save := fs.Bool("save", false, "also write a reusable manifest to ./<name>.yaml")
+	noBoot := fs.Bool("no-boot", false, "write the manifest but do not boot (implies --save)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *name == "" || *auth == "" || *allow == "" {
+		return fmt.Errorf("run needs --name, --auth, and --allow (try `nullbox run --help`)")
+	}
+	allowT, err := engage.ParseTargets(*allow)
+	if err != nil {
+		return err
+	}
+	denyT, err := engage.ParseTargets(*deny)
+	if err != nil {
+		return err
+	}
+	end := *until
+	if end == "" {
+		end = time.Now().Add(time.Duration(*days) * 24 * time.Hour).UTC().Format(time.RFC3339)
+	}
+	e := &model.Engagement{
+		APIVersion: "nullbox/v1", Kind: "Engagement",
+		Metadata: model.Metadata{
+			Name:          *name,
+			Client:        *client,
+			Authorization: model.Authorization{Ref: *auth},
+		},
+		Spec: model.Spec{
+			Template:     *tmpl,
+			Driver:       model.Driver(*drv),
+			Image:        *image,
+			Window:       model.Window{End: end},
+			Network:      model.Network{Profile: model.Profile(*profile)},
+			Capabilities: model.Capabilities{InfraTools: *infra},
+			Workspace:    *workspace,
+			Scope:        model.Scope{Allow: allowT, Deny: denyT},
+		},
+	}
+	if e.Spec.Template != "" {
+		t, err := template.Load(e.Spec.Template)
+		if err != nil {
+			return err
+		}
+		t.ApplyTo(&e.Spec)
+	}
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	manifestPath := ""
+	if *save || *noBoot {
+		p, err := engage.WriteManifest(e, "", true)
+		if err != nil {
+			return err
+		}
+		manifestPath = p
+		fmt.Printf("wrote %s\n", p)
+	}
+	if *noBoot {
+		fmt.Printf("engagement %q ready (not booted — run `nullbox up %s` when ready)\n", e.Metadata.Name, manifestPath)
+		return nil
+	}
+	st, _, err := engage.Up(e, e.Spec.Workspace, manifestPath)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("engagement %q up via %s (state: %s)\n", st.Name, st.Driver, st.State)
+	fmt.Printf("  attach a shell:  nullbox shell %s\n", st.Name)
+	return nil
 }

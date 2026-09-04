@@ -125,7 +125,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.form.err = err.Error()
 		return m, nil
 	}
-	path, err := engage.WriteManifest(e, "")
+	path, err := engage.WriteManifest(e, "", false)
 	if err != nil {
 		m.form.err = err.Error()
 		return m, nil

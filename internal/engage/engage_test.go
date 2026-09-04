@@ -36,7 +36,7 @@ func TestParseTargets(t *testing.T) {
 func TestWriteManifest(t *testing.T) {
 	dir := t.TempDir()
 	e := &model.Engagement{APIVersion: "nullbox/v1", Kind: "Engagement", Metadata: model.Metadata{Name: "x"}}
-	p, err := WriteManifest(e, dir)
+	p, err := WriteManifest(e, dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestWriteManifest(t *testing.T) {
 	if _, err := os.Stat(p); err != nil {
 		t.Error("manifest not written")
 	}
-	if _, err := WriteManifest(e, dir); err == nil {
+	if _, err := WriteManifest(e, dir, false); err == nil {
 		t.Error("second write must refuse to overwrite")
 	}
 }

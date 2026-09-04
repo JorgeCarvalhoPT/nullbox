@@ -89,14 +89,17 @@ func ParseTargets(s string) ([]model.Target, error) {
 }
 
 // WriteManifest marshals an engagement to <dir>/<name>.yaml (dir "" => cwd) and
-// returns the path. It refuses to overwrite an existing file.
-func WriteManifest(e *model.Engagement, dir string) (string, error) {
+// returns the path. Unless overwrite is set, it refuses to clobber an existing
+// file.
+func WriteManifest(e *model.Engagement, dir string, overwrite bool) (string, error) {
 	if dir == "" {
 		dir = "."
 	}
 	path := filepath.Join(dir, e.Metadata.Name+".yaml")
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists", path)
+	if !overwrite {
+		if _, err := os.Stat(path); err == nil {
+			return "", fmt.Errorf("%s already exists", path)
+		}
 	}
 	b, err := yaml.Marshal(e)
 	if err != nil {
