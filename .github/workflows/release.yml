@@ -20,7 +20,10 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          # Skip the Homebrew cask when the tap token isn't configured yet, so
+          # the binary release (curl installer) still publishes cleanly. Add the
+          # HOMEBREW_TAP_TOKEN secret to enable brew on the next release.
+          args: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && 'release --clean' || 'release --clean --skip=homebrew' }}
         env:
           # Creates the GitHub release + uploads binaries:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
