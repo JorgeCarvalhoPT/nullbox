@@ -14,7 +14,7 @@ import (
 	"github.com/JorgeCarvalhoPT/nullbox/internal/policy"
 )
 
-func init() { register(&fcDriver{}) }
+// (registration lives in firecracker_boot_linux.go, which wires the real booter.)
 
 // fcDriver runs an engagement as a Firecracker microVM on Linux. The
 // security-critical pieces — applying the deny-by-default egress ruleset,
@@ -67,15 +67,41 @@ func (d *fcDriver) Up(spec UpSpec) (*Status, error) {
 			"build. Provide a bootFunc (firecracker config + jailer) to complete `up`")
 	}
 
-	// 1. Apply the deny-by-default base ruleset.
-	if err := applyNFT(spec.Ruleset.NFT); err != nil {
+	// 1. Prepare the TAP (with its /30 gateway) and enable forwarding, so the
+	//    guest can route out through the host.
+	tap := "nbx-" + spec.Engagement.Metadata.Name
+	if err := ensureTAP(tap); err != nil {
+		delTAP(tap) // don't leave a half-created interface for the next run to reuse
+		return nil, fmt.Errorf("tap setup: %w", err)
+	}
+	if err := ensureIPForward(); err != nil {
+		delTAP(tap)
+		return nil, fmt.Errorf("enable ip_forward: %w", err)
+	}
+	uplink := defaultUplink()
+
+	// 2. Recompile the ruleset now that the tap + uplink are known, so the
+	//    forward-hook + masquerade chains carry the real interface names.
+	//    (spec.Ruleset was compiled host-agnostically; the output-hook chain it
+	//    contains does NOT see forwarded guest traffic — this is the real filter.)
+	rs, err := policy.CompileWith(spec.Engagement, policy.Options{
+		EgressIface: tap, UplinkIface: uplink, EnableForward: true,
+	})
+	if err != nil {
+		delTAP(tap)
+		return nil, fmt.Errorf("compile forward policy: %w", err)
+	}
+	if err := applyNFT(rs.NFT); err != nil {
+		delTAP(tap)
 		return nil, fmt.Errorf("apply egress policy: %w", err)
 	}
-	// 2. Resolve host-form scope entries and admit them to the allow set.
-	if len(spec.Ruleset.UnresolvedHosts) > 0 {
-		res, err := policy.ResolveHostRules(spec.Ruleset.UnresolvedHosts, systemResolver)
+
+	// 3. Resolve host-form scope entries and admit them to the allow set.
+	if len(rs.UnresolvedHosts) > 0 {
+		res, err := policy.ResolveHostRules(rs.UnresolvedHosts, systemResolver)
 		if err != nil {
-			flushNFT() // roll back: never leave a half-open policy
+			flushNFT()
+			delTAP(tap)
 			return nil, fmt.Errorf("resolve host scope: %w", err)
 		}
 		for _, s := range res.Skipped {
@@ -84,16 +110,13 @@ func (d *fcDriver) Up(spec UpSpec) (*Status, error) {
 		if res.AddElements != "" {
 			if err := applyNFT(res.AddElements); err != nil {
 				flushNFT()
+				delTAP(tap)
 				return nil, fmt.Errorf("admit resolved hosts: %w", err)
 			}
 		}
 	}
-	// 3. Prepare the TAP and boot.
-	tap := "nbx-" + spec.Engagement.Metadata.Name
-	if err := ensureTAP(tap); err != nil {
-		flushNFT()
-		return nil, fmt.Errorf("tap setup: %w", err)
-	}
+
+	// 4. Boot the microVM.
 	st, err := d.boot(spec, tap)
 	if err != nil {
 		delTAP(tap)
@@ -107,9 +130,12 @@ func (*fcDriver) Shell(name string) error {
 	return fmt.Errorf("firecracker: shell requires a booted microVM (VM console/exec is wired with the booter) — engagement %q", name)
 }
 
-// Kill is the panic button: flush the egress ruleset immediately. It does not
-// require a healthy VM and is safe to call repeatedly.
+// Kill is the panic button. It severs the guest's egress PATH first (delete the
+// TAP) THEN flushes the ruleset — deleting the deny-by-default table alone would
+// leave the forward hook default-accept with ip_forward still on, i.e. fail
+// OPEN. Safe to call repeatedly and without a healthy VM.
 func (*fcDriver) Kill(name string) error {
+	delTAP("nbx-" + name)
 	if err := flushNFT(); err != nil {
 		return fmt.Errorf("flush egress policy for %q: %w", name, err)
 	}
@@ -134,26 +160,41 @@ func applyNFT(program string) error {
 	return nil
 }
 
-// flushNFT removes the egress table. Absence is success (idempotent).
+// flushNFT removes both nullbox tables: the inet filter table and the ip NAT
+// table (present only when a routed guest was up). Absence is success.
 func flushNFT() error {
-	cmd := exec.Command("nft", "delete", "table", "inet", policy.TableName)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(out), "No such file") || strings.Contains(string(out), "does not exist") {
-			return nil
+	del := func(fam string) error {
+		out, err := exec.Command("nft", "delete", "table", fam, policy.TableName).CombinedOutput()
+		if err != nil {
+			s := string(out)
+			if strings.Contains(s, "No such file") || strings.Contains(s, "does not exist") {
+				return nil
+			}
+			return fmt.Errorf("%v: %s", err, strings.TrimSpace(s))
 		}
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		return nil
 	}
-	return nil
+	if err := del("inet"); err != nil {
+		return err
+	}
+	return del("ip")
 }
 
 func ensureTAP(tap string) error {
-	// Idempotent: if it exists, reuse it.
-	if _, err := net.InterfaceByName(tap); err == nil {
-		return nil
+	// Create only if missing, but ALWAYS (re)assert the /30 gateway and up state
+	// so a leftover addressless/down TAP from a partial prior run is corrected
+	// rather than silently reused (which would boot the guest with a nonexistent
+	// gateway).
+	if _, err := net.InterfaceByName(tap); err != nil {
+		if out, err := exec.Command("ip", "tuntap", "add", "dev", tap, "mode", "tap").CombinedOutput(); err != nil {
+			return fmt.Errorf("ip tuntap add: %v: %s", err, strings.TrimSpace(string(out)))
+		}
 	}
-	if out, err := exec.Command("ip", "tuntap", "add", "dev", tap, "mode", "tap").CombinedOutput(); err != nil {
-		return fmt.Errorf("ip tuntap add: %v: %s", err, strings.TrimSpace(string(out)))
+	// The host TAP is the guest's default gateway (fcHostTapIP/30).
+	if out, err := exec.Command("ip", "addr", "add", fcTapCIDR, "dev", tap).CombinedOutput(); err != nil {
+		if s := strings.TrimSpace(string(out)); !strings.Contains(s, "File exists") {
+			return fmt.Errorf("ip addr add: %v: %s", err, s)
+		}
 	}
 	if out, err := exec.Command("ip", "link", "set", tap, "up").CombinedOutput(); err != nil {
 		return fmt.Errorf("ip link set up: %v: %s", err, strings.TrimSpace(string(out)))

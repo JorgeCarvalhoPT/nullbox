@@ -374,7 +374,24 @@
     $("#ver").textContent = `nullbox v0.1.0 · ${engagements.filter(e=>stateOf(e)==="running").length} running`;
     active = engagements.some(e=>e.name===store.get("nbx.active")) ? store.get("nbx.active") : engagements[0].name;
     seed(); render();
-    setInterval(tick,1700);
+    // Live: consume the real nftables egress stream. Demo: simulate.
+    if(live){ startEventStream(); } else { setInterval(tick,1700); }
+  }
+
+  function startEventStream(){
+    try{
+      const es = new EventSource("/api/events");
+      es.onmessage = (m) => {
+        let ev; try{ ev = JSON.parse(m.data); }catch{ return; }
+        const name = ev.engagement; if(!name) return;
+        const arr = (feeds[name] ||= []);
+        arr.push({ ts:new Date(ev.ts), proto:ev.proto, dst:ev.dst, dport:ev.dport, verdict:ev.verdict, note:ev.note||"" });
+        if(arr.length>200) arr.shift();
+        const e = engagements.find(x=>x.name===name);
+        if(e){ if(ev.verdict==="drop") e.denied=(e.denied||0)+1; else e.allowed=(e.allowed||0)+1; }
+        if(name===active && tab==="egress") renderPane();
+      };
+    }catch{}
   }
   boot();
 })();

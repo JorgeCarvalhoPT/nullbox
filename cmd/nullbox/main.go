@@ -30,6 +30,7 @@ import (
 	"github.com/JorgeCarvalhoPT/nullbox/internal/driver"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/manifest"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/model"
+	"github.com/JorgeCarvalhoPT/nullbox/internal/nflog"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/policy"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/store"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/tui"
@@ -304,7 +305,32 @@ func cmdConsole(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	srv := console.New(nil) // a live nftables flow feed is wired in phase 1+
+	// Live nftables egress feed (Linux + CAP_NET_ADMIN). Off Linux, or without
+	// the capability, degrade to state-only and let the UI simulate.
+	var feed console.Feed
+	if r, err := nflog.NewFeed(runningEngagementName(), uint16(policy.NFLOGGroupAccept), uint16(policy.NFLOGGroupDrop)); err == nil {
+		feed = r
+		defer r.Close()
+		fmt.Println("nullbox console: live egress feed active")
+	} else {
+		fmt.Fprintf(os.Stderr, "nullbox console: live egress feed unavailable (%v); serving state only\n", err)
+	}
+	srv := console.New(feed)
 	fmt.Printf("nullbox console → http://%s\n", *addr)
 	return http.ListenAndServe(*addr, srv.Handler())
+}
+
+// runningEngagementName returns the name events are stamped with — the single
+// running engagement (the fixed nft table means one per host in phase 1).
+func runningEngagementName() string {
+	recs, err := store.List()
+	if err != nil {
+		return ""
+	}
+	for _, r := range recs {
+		if r.State == "running" {
+			return r.Name
+		}
+	}
+	return ""
 }

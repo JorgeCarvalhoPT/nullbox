@@ -1,9 +1,9 @@
 # nullbox
 
-A Smith-native pentest sandbox. It runs agent-smith / AI pentest agents inside a
-microVM and **enforces engagement scope as a packet filter**, so the full
-network toolchain — raw sockets, UDP, ICMP, L2 — keeps working while every
-destination stays deny-by-default and explicitly authorized.
+A sandbox for AI pentesting agents. It runs an agent inside a microVM and
+**enforces engagement scope as a packet filter**, so the full network toolchain
+— raw sockets, UDP, ICMP, L2 — keeps working while every destination stays
+deny-by-default and explicitly authorized.
 
 ## Install
 
@@ -58,21 +58,34 @@ Run `nullbox` for the terminal UI, or drive it from the command line: `validate`
 `render` (print the compiled nftables policy), `up`, `shell`, `kill`, `down`,
 `list`, `console` (web UI), `version`.
 
-## Status: Phase 0
+## Status
 
-Fully working, no host VMM required:
+All three phases are implemented. The pure logic is unit-tested and every path
+cross-compiles for Linux; the parts that touch a hypervisor or a cluster are
+driven through injected seams and table-tested against fakes, but a **live
+microVM boot and a live cluster apply can only be verified on real hardware** (a
+Linux/KVM host; a Kubernetes cluster with the Kata runtime + a policy-enforcing
+CNI). Those paths are marked below, and nothing fakes a boot it cannot perform.
 
-- **manifest schema + validation** (`internal/model`, `internal/manifest`)
-- **policy compiler**: manifest → nftables egress ruleset + host resolver (`internal/policy`)
-- **engagement store** with name-based lifecycle (`internal/store`)
-- **terminal UI** (`internal/tui`) and **web console** (`internal/console`)
-- **CLI**: `validate`, `render`, `list`, `console`, `version`
+Built and unit-tested off-hardware:
 
-Completed on a host with the VMM:
+- **policy compiler** → nftables: deny-wins, port-scoping, the guest-egress
+  `forward` chain + masquerade, and NFLOG accept/drop groups (`internal/policy`)
+- **egress event decoder** (packet → FlowEvent), **engagement store**,
+  **terminal UI** + **web console** with a live event stream when on Linux
+- **capability-contract generator** (`internal/contract`), **Kata NetworkPolicy
+  renderer** with deny-wins via `ipBlock.except`, **tool-Job renderer**
+  (`internal/toolrunner`), and the firecracker / krun / kata command layers
+- **CLI**: `validate`, `render`, `up`, `shell`, `kill`, `down`, `list`,
+  `console`, `version`
 
-- **VMM drivers** (`internal/driver`): `krun` preflight is real; the Firecracker
-  driver applies the egress policy and implements the kill switch for real, with
-  a pluggable microVM boot. `up` / `shell` need a host with the backend installed.
+Implemented, verified only on real hardware:
+
+- **Phase 1** — Firecracker microVM boot (raw API over the unix socket) on
+  Linux/KVM; krun/libkrun boot on a laptop; the NFLOG netlink reader (CAP_NET_ADMIN)
+- **Phase 2** — the Kata driver applying manifests to a cluster
+- **Phase 3** — injecting the generated contract into the guest, and the sibling
+  tool runner (K8s Jobs on the cluster / scoped containers on the laptop)
 
 ## Quickstart
 
@@ -124,12 +137,17 @@ internal/console/   web console (embedded HTML + JSON/SSE API)
 examples/           engagement manifests
 ```
 
-## Roadmap
+## Remaining (hardware verification + hardening)
 
-- **Phase 1** — `routed`/`l2` on Firecracker+TAP (the nftables ruleset applies
-  here), host DNS resolution for host-form scope entries, evidence flow logging,
-  and the real Firecracker microVM boot.
-- **Phase 2** — `kata` driver: the same manifest on Kubernetes, a namespace per
-  engagement, egress attribution, a shared node image cache.
-- **Phase 3** — a generated capability contract from the resolved profile, and a
-  Job/sibling-VM tool runner in place of nested docker.
+The phases are implemented; what's left is proving them on real hardware and a
+few hardening items:
+
+- Boot-test the Firecracker path end-to-end on Linux/KVM and confirm the
+  `forward` chain drops out-of-scope guest packets (needs a guest kernel + rootfs).
+- Per-engagement nft table names + TAP subnets, to allow more than one routed
+  engagement per host (today the fixed table means one at a time).
+- The guest↔controller `RunnerBroker` transport (vsock / unix socket) that
+  carries a `ToolSpec` from the in-guest agent to the sibling tool runner.
+- The `l2` profile on a bridge/netdev-family table — the inet `forward` hook does
+  not see bridged L2 frames, so l2 filtering needs a bridge table (and a host on
+  the target segment).

@@ -49,7 +49,7 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/JorgeCarvalhoPT/nullbox"
-    description: "Smith-native pentest sandbox — scope-as-code microVMs with a terminal UI"
+    description: "Sandbox for AI pentesting agents — scope-as-code microVMs with a terminal UI"
     # Strip the Gatekeeper quarantine xattr so the unsigned binary runs.
     hooks:
       post:
