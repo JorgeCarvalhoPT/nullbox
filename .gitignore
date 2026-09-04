@@ -1,0 +1,48 @@
+# ── Binaries ────────────────────────────────────────────────────────────────
+# The built CLI (`make build` / `go build -o nullbox`). Anchored to the repo
+# root with a leading slash so the cmd/nullbox/ source package is NOT ignored.
+/nullbox
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# ── GoReleaser / release output ──────────────────────────────────────────────
+/dist/
+
+# ── Test & coverage output ───────────────────────────────────────────────────
+*.test
+*.out
+*.prof
+*.cover
+coverage.*
+
+# ── Go workspace & vendoring (go.mod and go.sum ARE committed) ───────────────
+go.work
+go.work.sum
+/vendor/
+
+# ── Secrets / local config ───────────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+
+# ── Editors / IDEs ───────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS cruft ─────────────────────────────────────────────────────────────────
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log

@@ -1,0 +1,39 @@
+# Example engagement: internal network range, full raw/UDP/L2 toolchain.
+#
+# This manifest IS the authorization record. Committing it is committing the
+# scope. `nullbox render examples/acme-internal.yaml` shows the exact nftables
+# egress policy it compiles to — deny-by-default, deny-wins, metadata blocked.
+apiVersion: nullbox/v1
+kind: Engagement
+metadata:
+  name: acme-internal
+  client: ACME Corp
+  authorization:
+    ref: SOW-2026-0142
+    contact: security@acme.example
+    signed: "2026-09-01"
+spec:
+  # routed => firecracker on a Linux host: TAP + nftables, real raw sockets,
+  # UDP scans and ping sweeps. (l2 would add arp-scan/Responder on the segment.)
+  driver: firecracker
+  window:
+    start: "2026-09-15T00:00:00Z"
+    end: "2026-09-29T23:59:59Z"   # egress auto-expires here — scope cannot outlive authorization
+  network:
+    profile: routed
+    # denyMetadata defaults true; shown for clarity. Never flip without an
+    # explicit, authorized IMDS test.
+    denyMetadata: true
+  capabilities:
+    infraTools: true              # full image variant (masscan, netexec, responder, arp-scan…)
+  scope:
+    allow:
+      - cidr: 10.10.0.0/16        # the authorized internal range, all ports
+      - cidr: 10.20.5.0/24
+        ports: [443, 8443]        # a segment restricted to HTTPS only
+      - host: portal.acme.example # a named host (resolved at apply time, phase 1)
+    deny:
+      - cidr: 10.10.9.0/24        # explicit carve-out: production, out of scope (deny wins)
+  evidence:
+    retainFlows: true
+    retainDays: 400

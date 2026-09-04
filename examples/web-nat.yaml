@@ -1,0 +1,29 @@
+# Example engagement: external web app, laptop (krun) driver, NAT profile.
+#
+# This is the phase-0 laptop path: `nullbox up examples/web-nat.yaml` on a Mac
+# or Linux box with libkrun/krunvm installed. NAT gives routed TCP/UDP/ICMP-echo
+# to the scoped hosts — enough for /web-exploit, /api-security, /ssl-tls-audit.
+apiVersion: nullbox/v1
+kind: Engagement
+metadata:
+  name: acme-web
+  client: ACME Corp
+  authorization:
+    ref: SOW-2026-0143
+    contact: security@acme.example
+    signed: "2026-09-01"
+spec:
+  driver: krun
+  window:
+    end: "2026-09-20T23:59:59Z"
+  network:
+    profile: nat
+  capabilities:
+    infraTools: false             # thin image: web + codebase tooling only
+  workspace: ~/code/acme-web      # mounted read-only as the target codebase for /codebase
+  scope:
+    allow:
+      - host: app.acme.example
+      - host: "*.staging.acme.example"
+  evidence:
+    retainFlows: true

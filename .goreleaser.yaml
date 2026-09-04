@@ -1,0 +1,59 @@
+# GoReleaser — builds cross-platform binaries and publishes a Homebrew formula,
+# so `brew install <owner>/tap/nullbox` works just like `brew install docker/tap/sbx`.
+#
+# Cut a release:  git tag v0.1.0 && git push origin v0.1.0
+# The release workflow (.github/workflows/release.yml) runs `goreleaser release`.
+#
+# ── BEFORE FIRST RELEASE, replace `null` below with your GitHub owner, and
+#    create an (empty) tap repo named `homebrew-tap` under that owner. ──
+version: 2
+
+project_name: nullbox
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nullbox
+    main: ./cmd/nullbox
+    binary: nullbox
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/JorgeCarvalhoPT/nullbox/internal/buildinfo.Version={{ .Version }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: nullbox
+    formats: [tar.gz]
+    # Must match the name the install.sh script downloads:
+    #   nullbox_<version>_<os>_<arch>.tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: "JorgeCarvalhoPT" # <- replace with your GitHub owner (quotes required: bare null is YAML null)
+    name: nullbox
+
+# Homebrew cask (the current, non-deprecated way to ship a CLI binary via brew).
+# macOS only — Linux users use install.sh or `go install`.
+homebrew_casks:
+  - name: nullbox
+    repository:
+      owner: "JorgeCarvalhoPT" # <- replace with your GitHub owner (quotes required: bare null is YAML null)
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/JorgeCarvalhoPT/nullbox"
+    description: "Smith-native pentest sandbox — scope-as-code microVMs with a terminal UI"
+    # Strip the Gatekeeper quarantine xattr so the unsigned binary runs.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/nullbox"]
+          end

@@ -1,0 +1,381 @@
+<title>nullbox console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<style>
+  /* Tokyo-Night terminal aesthetic, matching the sbx TUI. Day palette on bare
+     :root; Night palette under dark OS pref and the [data-theme] toggle. */
+  :root{
+    --page:#c6cadb; --win:#e1e2e7; --card:#d8dae2; --card2:#cfd1db;
+    --ink:#343b58; --fg:#3760bf; --muted:#6a76a8; --faint:#8891ba;
+    --green:#587539; --red:#e2496b; --purple:#7847bd; --yellow:#8f6c30; --cyan:#0f7285;
+    --border:#c2c5d6; --border2:#b3b7cc; --glow:rgba(52,59,88,.18);
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --page:#0b0b10; --win:#16161e; --card:#1a1b26; --card2:#1e1f2e;
+    --ink:#c0caf5; --fg:#7aa2f7; --muted:#565f89; --faint:#3b4261;
+    --green:#9ece6a; --red:#f7768e; --purple:#bb9af7; --yellow:#e0af68; --cyan:#7dcfff;
+    --border:#252636; --border2:#2d2f44; --glow:rgba(0,0,0,.55);
+  }}
+  :root[data-theme="dark"]{
+    --page:#0b0b10; --win:#16161e; --card:#1a1b26; --card2:#1e1f2e;
+    --ink:#c0caf5; --fg:#7aa2f7; --muted:#565f89; --faint:#3b4261;
+    --green:#9ece6a; --red:#f7768e; --purple:#bb9af7; --yellow:#e0af68; --cyan:#7dcfff;
+    --border:#252636; --border2:#2d2f44; --glow:rgba(0,0,0,.55);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--page);
+    font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:var(--ink); font-size:13.5px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex; align-items:center; justify-content:center; padding:26px;
+  }
+  .win{
+    width:100%; max-width:1180px; background:var(--win); border-radius:12px;
+    box-shadow:0 24px 70px var(--glow),0 2px 0 rgba(255,255,255,.02) inset;
+    overflow:hidden; border:1px solid var(--border2); display:flex; flex-direction:column;
+    min-height:648px;
+  }
+
+  /* titlebar */
+  .titlebar{display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--border); position:relative}
+  .lights{display:flex; gap:8px}
+  .lights i{width:12px; height:12px; border-radius:50%; display:block}
+  .lights .r{background:#ff5f57} .lights .y{background:#febc2e} .lights .g{background:#28c840}
+  .titlebar .tt{position:absolute; left:0; right:0; text-align:center; font-size:12px; color:var(--muted); pointer-events:none}
+  .titlebar .tt b{color:var(--ink); font-weight:600}
+
+  /* appbar */
+  .appbar{display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--border)}
+  .appbar .lhs{display:flex; align-items:baseline; gap:14px; min-width:0}
+  .appbar .name{font-weight:700; color:var(--ink)} .appbar .name b{color:var(--green)}
+  .appbar .tag{color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .icons{display:flex; gap:6px}
+  .icons button{background:none; border:1px solid transparent; color:var(--muted); cursor:pointer; font-family:inherit; font-size:13px; padding:3px 8px; border-radius:6px}
+  .icons button:hover{color:var(--ink); border-color:var(--border2)}
+  .icons button:focus-visible{outline:2px solid var(--cyan); outline-offset:1px}
+
+  /* body */
+  .body{display:grid; grid-template-columns:322px 1fr; flex:1; min-height:0}
+  @media (max-width:800px){.body{grid-template-columns:1fr}}
+  .list{border-right:1px solid var(--border); padding:14px; display:flex; flex-direction:column; gap:12px; overflow:auto}
+  @media (max-width:800px){.list{border-right:none; border-bottom:1px solid var(--border); max-height:300px}}
+
+  /* engagement card */
+  .card{position:relative; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:13px 14px 11px; cursor:pointer; text-align:left; width:100%; font-family:inherit; color:inherit; display:block}
+  .card:hover{border-color:var(--border2)}
+  .card.active{border-color:var(--fg); box-shadow:0 0 0 1px var(--fg)}
+  .card:focus-visible{outline:none; border-color:var(--fg); box-shadow:0 0 0 1px var(--fg)}
+  .card .badge{position:absolute; top:11px; right:12px; color:var(--purple); font-size:10.5px; font-weight:600; letter-spacing:.04em}
+  .card .cn{display:flex; align-items:center; gap:8px; font-weight:600; color:var(--ink); font-size:13.5px}
+  .card .gl{font-size:11px}
+  .gl.running{color:var(--green)} .gl.killed{color:var(--red)} .gl.expired{color:var(--yellow)}
+  .card .agent{color:var(--muted); font-size:12px; margin-top:9px}
+  .card .path{color:var(--faint); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .card .res{color:var(--muted); font-size:12px; margin-top:2px}
+  .card .stat{color:var(--muted); font-size:12px; margin-top:2px}
+  .card .acts{margin-top:11px; padding-top:9px; border-top:1px solid var(--border); display:flex; gap:16px; font-size:12.5px}
+  .act{color:var(--muted)} .act.on{color:var(--ink)} .act .k{color:var(--yellow); font-weight:600}
+  .act.kill.on .k{color:var(--red)} .act.kill.on{color:var(--red)}
+  .card.dim .acts .act{color:var(--faint)} .card.dim .acts .act .k{color:var(--faint)}
+  .check{color:var(--green); font-size:11px; margin-left:4px}
+
+  /* right pane */
+  .pane{padding:20px 24px; overflow:auto; min-width:0; display:flex; flex-direction:column}
+  .pane h2{margin:0 0 14px; font-size:16px; font-weight:600; color:var(--ink)}
+  .tabs{display:flex; gap:22px; border-bottom:1px solid var(--border); margin-bottom:16px}
+  .tab{background:none; border:none; font-family:inherit; font-size:13px; color:var(--muted); cursor:pointer; padding:0 0 10px; position:relative; font-weight:500}
+  .tab.active{color:var(--ink); font-weight:600}
+  .tab.active::after{content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--fg)}
+  .tab:focus-visible{outline:2px solid var(--cyan); outline-offset:2px; border-radius:3px}
+  .tab .ct{color:var(--faint); font-weight:400}
+
+  .summary{color:var(--muted); font-size:13px; margin:2px 0 16px; display:flex; gap:18px; align-items:center}
+  .summary .n{color:var(--ink)}
+  .summary .g::before,.summary .r::before{content:"●"; margin-right:6px; font-size:10px}
+  .summary .g{color:var(--green)} .summary .r{color:var(--red)}
+
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  thead th{text-align:left; color:var(--muted); font-weight:500; padding:0 12px 10px; border-bottom:1px solid var(--border); font-size:12px}
+  thead th.num{text-align:right}
+  tbody td{padding:9px 12px; border-bottom:1px solid transparent; white-space:nowrap; vertical-align:middle}
+  tbody tr:hover td{background:var(--card2)}
+  td.num{text-align:right; color:var(--muted); font-variant-numeric:tabular-nums}
+  .rowdot{color:var(--green); margin-right:9px; font-size:9px; vertical-align:middle}
+  .rowdot.drop{color:var(--red)}
+  .host{color:var(--ink)} .port{color:var(--muted)}
+  .st{font-weight:600} .st.allow{color:var(--green)} .st.drop{color:var(--red)}
+  .blocklink{color:var(--red); opacity:0; font-size:12px}
+  tr:hover .blocklink{opacity:.8}
+  .action-cell{color:var(--muted)}
+  .tag-allow{color:var(--green); font-weight:600} .tag-deny{color:var(--red); font-weight:600}
+  .metanote{color:var(--faint); font-size:11.5px}
+  .pane-foot{margin-top:auto; padding-top:16px; color:var(--muted); font-size:12.5px}
+  .pane-foot .g{color:var(--green)} .pane-foot .r{color:var(--red)}
+  .empty{color:var(--faint); padding:40px 8px; text-align:center}
+
+  /* status bar */
+  .statusbar{display:flex; align-items:center; justify-content:space-between; gap:14px; padding:9px 16px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; flex-wrap:wrap}
+  .keys{display:flex; gap:16px; flex-wrap:wrap}
+  .keys b{color:var(--ink); font-weight:600; margin-right:5px}
+  .ver{color:var(--faint)}
+  .banner{margin:0 0 14px; padding:8px 12px; border-radius:7px; font-size:12.5px; border:1px solid}
+  .banner.warn{color:var(--yellow); border-color:var(--yellow); background:transparent}
+  .banner.dead{color:var(--red); border-color:var(--red); background:transparent}
+</style>
+
+<div class="win">
+  <div class="titlebar">
+    <span class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></span>
+    <span class="tt"><b>nullbox</b> — pentest sandboxes</span>
+  </div>
+  <div class="appbar">
+    <div class="lhs">
+      <span class="name">null<b>box</b></span>
+      <span class="tag">Run pentest agents in isolated microVMs — packet-scoped egress</span>
+    </div>
+    <div class="icons">
+      <span id="conn" style="color:var(--muted);font-size:12px;align-self:center"></span>
+      <button id="theme" title="toggle theme">☾</button>
+    </div>
+  </div>
+  <div class="body">
+    <div class="list" id="list"></div>
+    <div class="pane" id="pane"></div>
+  </div>
+  <div class="statusbar">
+    <div class="keys">
+      <span><b>↑↓</b>select</span><span><b>⏎</b>open</span><span><b>e</b>egress</span>
+      <span><b>s</b>scope</span><span><b>k</b>kill</span><span><b>^c</b>quit</span>
+    </div>
+    <span class="ver" id="ver">nullbox v0.1.0</span>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const el = (t,c,txt)=>{const e=document.createElement(t); if(c)e.className=c; if(txt!=null)e.textContent=txt; return e;};
+  const days = n => new Date(Date.now()+n*864e5).toISOString();
+  const store = {get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+
+  // theme toggle
+  const applyTheme = t => { if(t) document.documentElement.setAttribute("data-theme",t); $("#theme").textContent = t==="light"?"☀":"☾"; };
+  applyTheme(store.get("nbx.theme"));
+  $("#theme").onclick = () => { const cur=document.documentElement.getAttribute("data-theme"); const next=cur==="dark"?"light":cur==="light"?"dark":"light"; store.set("nbx.theme",next); applyTheme(next); };
+
+  const DEMO = [
+    { name:"acme-internal", client:"ACME Corp", driver:"firecracker", profile:"routed", state:"running",
+      authRef:"SOW-2026-0142", windowEnd:days(9), image:"nullbox/smith:full",
+      workspace:"/Users/op/engagements/acme/internal", res:"12%/4c · 6.2GB · routed · 8d 21h",
+      scope:[{target:"10.10.0.0/16",kind:"allow"},{target:"10.20.5.0/24:443,8443",kind:"allow"},
+             {target:"portal.acme.example",kind:"allow"},{target:"10.10.9.0/24",kind:"deny"}],
+      dsts:["10.10.1.14","10.10.4.9","10.20.5.7:443","10.10.22.3","portal.acme.example:443"],
+      outs:["10.10.9.12","8.8.8.8","169.254.169.254"] },
+    { name:"acme-web", client:"ACME Corp", driver:"krun", profile:"nat", state:"running",
+      authRef:"SOW-2026-0143", windowEnd:days(5), image:"nullbox/smith:thin",
+      workspace:"/Users/op/engagements/acme/web", res:"4%/2c · 1.9GB · nat · 4d 06h",
+      scope:[{target:"app.acme.example",kind:"allow"},{target:"*.staging.acme.example",kind:"allow"}],
+      dsts:["app.acme.example:443","api.staging.acme.example:443"], outs:["cdn.evil.example:443"] },
+    { name:"beta-scan", client:"Beta LLC", driver:"firecracker", profile:"routed", state:"killed",
+      authRef:"SOW-2026-0130", windowEnd:days(-1), image:"nullbox/smith:full",
+      workspace:"/Users/op/engagements/beta/scan", res:"stopped",
+      scope:[{target:"198.51.100.0/24",kind:"allow"}], dsts:["198.51.100.4"], outs:["198.51.100.250"] }
+  ];
+
+  let engagements=[], active=null, live=false, tab="egress", agg={};
+  const feeds={};
+
+  const stateOf = e => e.state==="running" && new Date(e.windowEnd) < Date.now() ? "expired" : e.state;
+  const glyph = s => s==="running"?"◔":s==="killed"?"■":s==="expired"?"▸":"■";
+
+  function seed(){
+    engagements.forEach(e=>{
+      if(feeds[e.name]) return;
+      const arr=[];
+      if(e.state==="running"){ for(let i=0;i<9;i++) arr.push(genEvent(e, i>7)); }
+      feeds[e.name]=arr;
+    });
+  }
+  function genEvent(e, forceDrop){
+    const drop = forceDrop || Math.random()<0.1;
+    const pool = drop ? (e.outs||["203.0.113.9"]) : (e.dsts||["10.0.0.2"]);
+    let dst = pool[Math.floor(Math.random()*pool.length)]||"10.0.0.2", dport=443;
+    const c=dst.split(":"); if(c[1]){dst=c[0]; dport=+c[1];} else dport=[443,8443,80,22,53][Math.floor(Math.random()*5)];
+    const proto = drop?["udp","tcp","icmp"][Math.floor(Math.random()*3)]:(dport===53?"udp":"tcp");
+    return {ts:new Date(),proto,dst,dport,verdict:drop?"drop":"accept",
+      note:drop?(dst==="169.254.169.254"?"metadata":"out of scope"):""};
+  }
+  // aggregate feed by destination -> the "log" rows (host + hits + status), like sbx
+  function aggregate(name){
+    const m=new Map();
+    (feeds[name]||[]).forEach(ev=>{
+      const key=ev.dst+":"+ev.dport;
+      const cur=m.get(key)||{dst:ev.dst,dport:ev.dport,proto:ev.proto,verdict:ev.verdict,hits:0,ts:ev.ts,note:ev.note};
+      cur.hits++; cur.ts=ev.ts; cur.verdict=ev.verdict; cur.note=ev.note; m.set(key,cur);
+    });
+    return [...m.values()].sort((a,b)=>b.ts-a.ts);
+  }
+  const hhmm = d => d.toLocaleTimeString([], {hour12:false});
+  const fmtWin = endISO => { const ms=new Date(endISO)-Date.now(); if(ms<=0)return"expired";
+    const dd=Math.floor(ms/864e5),h=Math.floor(ms%864e5/36e5); return dd>0?`${dd}d ${String(h).padStart(2,"0")}h`:`${h}h`; };
+
+  // ---- left list ----
+  function renderList(){
+    const L=$("#list"); L.textContent="";
+    engagements.forEach(e=>{
+      const st=stateOf(e), dim = st!=="running";
+      const c=el("button","card"+(e.name===active?" active":"")+(dim?" dim":""));
+      c.onclick=()=>{active=e.name; store.set("nbx.active",e.name); render();};
+      c.append(el("span","badge","microVM"));
+      const cn=el("div","cn");
+      cn.append(el("span","gl "+st,glyph(st)), el("span",null,e.name));
+      if(e.name===active) cn.append(el("span","check","✓"));
+      c.append(cn);
+      c.append(el("div","agent","agent-smith · Claude Code"));
+      c.append(el("div","path",e.workspace||""));
+      c.append(el("div","res", st==="running"? (e.res||"") : (st==="killed"?"killed":"expired") ));
+      const acts=el("div","acts");
+      if(st==="running"){
+        acts.append(actEl("stop",false),actEl("exec",true),actEl("kill",true,true));
+      } else {
+        acts.append(actEl("start",false),actEl("exec",false),actEl("remove",false));
+      }
+      c.append(acts);
+      L.append(c);
+    });
+  }
+  function actEl(word, on, isKill){
+    const a=el("span","act"+(on?" on":"")+(isKill?" kill":""));
+    a.append(el("span","k",word[0]), document.createTextNode(word.slice(1)));
+    if(isKill && on) a.onclick=(ev)=>{ev.stopPropagation(); killActive();};
+    return a;
+  }
+
+  // ---- right pane ----
+  function render(){ renderList(); renderPane(); }
+  function renderPane(){
+    const P=$("#pane"); P.textContent="";
+    const e=engagements.find(x=>x.name===active);
+    if(!e){ P.append(el("div","empty","No engagement selected.")); return; }
+    const st=stateOf(e);
+    P.append(el("h2",null,e.name));
+
+    // tabs
+    const rows=aggregate(e.name);
+    const rules=(e.scope||[]).length + 1; // + implicit metadata deny
+    const tabs=el("div","tabs");
+    tabs.append(tabBtn("egress","Egress Log", rows.length), tabBtn("scope","Scope Rules", rules));
+    P.append(tabs);
+
+    if(st==="expired") P.append(banner("warn","window elapsed — egress auto-expired; scope no longer authorized"));
+    if(st==="killed")  P.append(banner("dead","egress flushed — nft table deleted; nothing can leave this microVM"));
+
+    if(tab==="egress") renderEgress(P,e,rows);
+    else renderScope(P,e);
+  }
+  function tabBtn(id,label,count){
+    const b=el("button","tab"+(tab===id?" active":""));
+    b.append(document.createTextNode(label+" "), el("span","ct","("+count+")"));
+    b.onclick=()=>{tab=id; renderPane();};
+    return b;
+  }
+  function banner(kind,txt){ return el("div","banner "+kind,txt); }
+
+  function renderEgress(P,e,rows){
+    const allowed=rows.filter(r=>r.verdict!=="drop").length, blocked=rows.length-allowed;
+    const sum=el("div","summary");
+    sum.append(spanHTML(`<span class="n">${rows.length}</span> destinations`),
+               el("span","g",allowed+" allowed"), el("span","r",blocked+" dropped"));
+    P.append(sum);
+    if(!rows.length){ P.append(el("div","empty","no egress recorded yet — the agent hasn't reached the network")); footer(P,0,0); return; }
+    const t=el("table");
+    t.innerHTML="<thead><tr><th>Last seen</th><th>Destination</th><th class='num'>Hits</th><th>Status</th></tr></thead>";
+    const tb=el("tbody");
+    rows.forEach(r=>{
+      const tr=el("tr");
+      tr.append(td(`<span class="rowdot ${r.verdict==="drop"?"drop":""}">●</span>${hhmm(r.ts)}`));
+      const dest = `<span class="host">${r.dst}</span><span class="port">:${r.dport} ${r.proto}</span>` + (r.note?` <span class="blocklink">${r.note}</span>`:"");
+      tr.append(td(dest));
+      tr.append(td(String(r.hits),"num"));
+      tr.append(td(`<span class="st ${r.verdict==="drop"?"drop":"allow"}">${r.verdict==="drop"?"Dropped":"Allowed"}</span>`));
+      tb.append(tr);
+    });
+    t.append(tb); P.append(t);
+    footer(P,allowed,blocked);
+  }
+  function renderScope(P,e){
+    const t=el("table");
+    t.innerHTML="<thead><tr><th>Destination</th><th>Ports</th><th>Action</th></tr></thead>";
+    const tb=el("tbody");
+    (e.scope||[]).forEach(s=>{
+      const [host,ports]=s.target.split(":");
+      const tr=el("tr");
+      tr.append(td(`<span class="host">${host}</span>`));
+      tr.append(td(`<span class="port">${ports||"all"}</span>`));
+      tr.append(td(`<span class="tag-${s.kind}">${s.kind}</span>`));
+      tb.append(tr);
+    });
+    // implicit, always-on rule
+    const meta=el("tr");
+    meta.append(td(`<span class="host">169.254.169.254</span> <span class="metanote">metadata</span>`), td(`<span class="port">all</span>`), td(`<span class="tag-deny">deny</span>`));
+    tb.append(meta);
+    t.append(tb); P.append(t);
+    const foot=el("div","pane-foot"); foot.textContent="deny-by-default · deny wins · compiled to nftables"; P.append(foot);
+  }
+  function footer(P,a,b){
+    const f=el("div","pane-foot");
+    f.append(spanHTML(`<span class="g">${a} allowed</span> destinations · <span class="r">${b} dropped</span>`));
+    P.append(f);
+  }
+  const td=(html,cls)=>{const d=el("td",cls); d.innerHTML=html; return d;};
+  const spanHTML=h=>{const s=el("span"); s.innerHTML=h; return s;};
+
+  // ---- actions ----
+  async function killActive(){
+    const e=engagements.find(x=>x.name===active); if(!e||stateOf(e)!=="running")return;
+    if(!confirm(`Flush all egress for "${e.name}"? Deletes its nftables table immediately.`))return;
+    if(live){ try{ const r=await fetch(`/api/engagements/${e.name}/kill`,{method:"POST"});
+      if(!r.ok){const j=await r.json().catch(()=>({})); alert("kill failed: "+(j.error||r.status)); return;} }
+      catch(err){ alert("kill failed: "+err); return; } }
+    e.state="killed"; render();
+  }
+
+  // ---- keyboard, TUI-style ----
+  document.addEventListener("keydown", ev=>{
+    if(ev.target.tagName==="INPUT")return;
+    const i=engagements.findIndex(x=>x.name===active);
+    if(ev.key==="ArrowDown"){ ev.preventDefault(); active=engagements[Math.min(i+1,engagements.length-1)].name; store.set("nbx.active",active); render(); }
+    else if(ev.key==="ArrowUp"){ ev.preventDefault(); active=engagements[Math.max(i-1,0)].name; store.set("nbx.active",active); render(); }
+    else if(ev.key==="e"){ tab="egress"; renderPane(); }
+    else if(ev.key==="s"){ tab="scope"; renderPane(); }
+    else if(ev.key==="k"){ killActive(); }
+  });
+
+  // ---- live feed simulation ----
+  function tick(){
+    engagements.filter(e=>stateOf(e)==="running").forEach(e=>{
+      const arr=(feeds[e.name]||=[]); arr.push(genEvent(e,false)); if(arr.length>120) arr.shift();
+    });
+    if(tab==="egress") renderPane();
+  }
+
+  async function boot(){
+    try{
+      const r=await fetch("/api/engagements",{headers:{accept:"application/json"}});
+      if(r.ok){ const d=await r.json(); if(Array.isArray(d)&&d.length){ engagements=d; live=true; } }
+    }catch{}
+    if(!engagements.length) engagements=DEMO.map(x=>({...x}));
+    $("#conn").textContent = live?"● live":"● demo";
+    $("#conn").style.color = live?"var(--green)":"var(--muted)";
+    $("#ver").textContent = `nullbox v0.1.0 · ${engagements.filter(e=>stateOf(e)==="running").length} running`;
+    active = engagements.some(e=>e.name===store.get("nbx.active")) ? store.get("nbx.active") : engagements[0].name;
+    seed(); render();
+    setInterval(tick,1700);
+  }
+  boot();
+})();
+</script>
