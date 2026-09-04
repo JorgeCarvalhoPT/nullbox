@@ -21,13 +21,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/JorgeCarvalhoPT/nullbox/internal/buildinfo"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/console"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/driver"
+	"github.com/JorgeCarvalhoPT/nullbox/internal/engage"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/manifest"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/model"
 	"github.com/JorgeCarvalhoPT/nullbox/internal/nflog"
@@ -128,7 +126,7 @@ func cmdValidate(args []string) error {
 	fmt.Printf("  authorization: %s\n", e.Metadata.Authorization.Ref)
 	fmt.Printf("  window ends : %s\n", e.Spec.Window.End)
 	fmt.Printf("  profile     : %s   driver: %s\n", e.Spec.Network.Profile, drvName)
-	fmt.Printf("  image       : %s\n", imageRef(e))
+	fmt.Printf("  image       : %s\n", engage.ImageRef(e))
 	fmt.Printf("  scope       : %d allow, %d deny  (metadata denied: %v)\n",
 		len(e.Spec.Scope.Allow), len(e.Spec.Scope.Deny), e.Spec.Network.DenyMetadataEnabled())
 	return nil
@@ -171,43 +169,14 @@ func cmdUp(args []string) error {
 	if err != nil {
 		return err
 	}
-	rs, err := policy.Compile(e)
-	if err != nil {
-		return err
-	}
-	d, err := driver.Select(e)
-	if err != nil {
-		return err
-	}
-	if err := d.Preflight(e.Spec.Network.Profile); err != nil {
-		return err
-	}
 	ws := e.Spec.Workspace
 	if *workspace != "" {
 		ws = *workspace
 	}
-	st, err := d.Up(driver.UpSpec{Engagement: e, Ruleset: rs, ImageRef: imageRef(e), Workspace: ws})
+	abs, _ := filepath.Abs(path)
+	st, _, err := engage.Up(e, ws, abs)
 	if err != nil {
 		return err
-	}
-	abs, _ := filepath.Abs(path)
-	rec := store.Record{
-		Name:         e.Metadata.Name,
-		Client:       e.Metadata.Client,
-		Driver:       string(d.Name()),
-		Profile:      string(e.Spec.Network.Profile),
-		ImageRef:     imageRef(e),
-		Workspace:    ws,
-		ManifestPath: abs,
-		AuthRef:      e.Metadata.Authorization.Ref,
-		WindowEnd:    e.Spec.Window.End,
-		CreatedAt:    time.Now(),
-		State:        st.State,
-		MCPPort:      st.MCPPort,
-		Scope:        scopeEntries(e),
-	}
-	if err := store.Save(rec); err != nil {
-		return fmt.Errorf("engagement started but recording it failed: %w", err)
 	}
 	fmt.Printf("engagement %q up via %s (state: %s)\n", st.Name, st.Driver, st.State)
 	return nil
@@ -262,50 +231,6 @@ func cmdList(_ []string) error {
 		fmt.Printf("%-22s %-12s %-8s %-9s %s\n", r.Name, r.Driver, r.Profile, r.State, r.WindowEnd)
 	}
 	return nil
-}
-
-// imageRef resolves the guest OCI image — ANY AI pentesting agent. If the
-// manifest names one (spec.image), it wins; nullbox does not care which agent
-// runs inside. Otherwise a built-in default guest is chosen by infraTools: the
-// full variant carries the Kali infra domain (masscan, netexec, responder…) for
-// routed/l2, thin is web + codebase only.
-func imageRef(e *model.Engagement) string {
-	if e.Spec.Image != "" {
-		return e.Spec.Image
-	}
-	if e.Spec.Capabilities.InfraTools {
-		return "nullbox/guest:full"
-	}
-	return "nullbox/guest:thin"
-}
-
-// scopeEntries renders the manifest's allow/deny targets for display in the
-// console, so the operator sees the authorized surface without the manifest.
-func scopeEntries(e *model.Engagement) []store.ScopeEntry {
-	var out []store.ScopeEntry
-	add := func(ts []model.Target, kind string) {
-		for _, t := range ts {
-			out = append(out, store.ScopeEntry{Target: targetStr(t), Kind: kind})
-		}
-	}
-	add(e.Spec.Scope.Allow, "allow")
-	add(e.Spec.Scope.Deny, "deny")
-	return out
-}
-
-func targetStr(t model.Target) string {
-	base := t.CIDR
-	if base == "" {
-		base = t.Host
-	}
-	if len(t.Ports) > 0 {
-		parts := make([]string, len(t.Ports))
-		for i, p := range t.Ports {
-			parts[i] = strconv.Itoa(p)
-		}
-		base += ":" + strings.Join(parts, ",")
-	}
-	return base
 }
 
 func cmdConsole(args []string) error {

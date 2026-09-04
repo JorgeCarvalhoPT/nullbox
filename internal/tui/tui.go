@@ -8,6 +8,8 @@
 package tui
 
 import (
+	"os"
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,9 +19,9 @@ import (
 	"github.com/JorgeCarvalhoPT/nullbox/internal/store"
 )
 
-// Run launches the TUI (full-screen, alternate buffer).
+// Run launches the TUI (full-screen, alternate buffer, mouse enabled).
 func Run() error {
-	_, err := tea.NewProgram(New(), tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(New(), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }
 
@@ -29,6 +31,20 @@ const (
 	tabEgress tab = iota
 	tabScope
 )
+
+// Layout geometry for click hit-testing on the left card column. Kept in sync
+// with view.go: the View opens with a blank line + titlebar + rule + appbar +
+// rule + blank (6 rows) before the body; each card is 8 rows (rounded border +
+// 6 content lines), and the "stop/exec/kill" action row is the 7th (index 6).
+const (
+	tuiHeaderLines = 6
+	tuiCardHeight  = 8
+	tuiListWidth   = 36
+	tuiActsRow     = 6
+)
+
+type reloadMsg struct{}
+type execDoneMsg struct{ err error }
 
 type scopeEntry struct{ target, kind string }
 
@@ -60,6 +76,8 @@ type model struct {
 	demo   bool
 	status string
 	st     styles
+	mode   int // modeList | modeForm | modeConfirm
+	form   formState
 }
 
 // New builds the model from the store, or demo data when the store is empty.
@@ -91,10 +109,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		return m, nil
+	case tea.MouseMsg:
+		if m.mode == modeList && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			return m.handleClick(msg.X, msg.Y)
+		}
+		return m, nil
+	case bootDoneMsg:
+		if msg.err != nil {
+			m.status = msg.name + ": boot failed: " + msg.err.Error()
+		} else {
+			m.status = msg.name + ": up"
+			(&m).reload()
+		}
+		return m, nil
 	case tea.KeyMsg:
+		if m.mode == modeForm {
+			return m.updateForm(msg)
+		}
+		if m.mode == modeConfirm {
+			return m.updateConfirm(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "n": // new engagement
+			m.mode = modeForm
+			m.form = newForm()
+			return m, nil
 		case "up":
 			if m.sel > 0 {
 				m.sel--
@@ -113,7 +154,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.tab = tabEgress
 			}
-		case "k":
+		case "x": // exec — attach a shell
+			return m, (&m).execSelected()
+		case "d": // stop (down) the running engagement
+			if len(m.engs) > 0 && m.stateOf(m.engs[m.sel]) == "running" {
+				cmd, status := (&m).stopSelected()
+				m.status = status
+				return m, cmd
+			}
+		case "k": // kill — flush egress (panic)
 			m.status = (&m).killSelected()
 		}
 		return m, nil
@@ -127,6 +176,62 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tick()
+	case reloadMsg:
+		(&m).reload()
+		return m, nil
+	case execDoneMsg:
+		m.status = ""
+		if msg.err != nil {
+			m.status = "exec: " + msg.err.Error()
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleClick maps a left-click to card selection or a "stop/exec/kill" verb.
+func (m model) handleClick(x, y int) (tea.Model, tea.Cmd) {
+	if x < 0 || x >= tuiListWidth || y < tuiHeaderLines {
+		return m, nil
+	}
+	localY := y - tuiHeaderLines
+	idx := localY / tuiCardHeight
+	if idx < 0 || idx >= len(m.engs) {
+		return m, nil
+	}
+	m.sel = idx // clicking anywhere on a card selects it
+	if localY%tuiCardHeight != tuiActsRow {
+		return m, nil
+	}
+	verb := -1
+	switch {
+	case x >= 2 && x < 8:
+		verb = 0 // stop / start
+	case x >= 8 && x < 14:
+		verb = 1 // exec
+	case x >= 14 && x < 24:
+		verb = 2 // kill / remove
+	}
+	return m.triggerVerb(verb)
+}
+
+// triggerVerb runs a card action for the selected engagement.
+func (m model) triggerVerb(verb int) (tea.Model, tea.Cmd) {
+	if len(m.engs) == 0 || verb < 0 {
+		return m, nil
+	}
+	running := m.stateOf(m.engs[m.sel]) == "running"
+	switch {
+	case verb == 1: // exec works in either state
+		return m, (&m).execSelected()
+	case running && verb == 0: // stop
+		cmd, status := (&m).stopSelected()
+		m.status = status
+		return m, cmd
+	case running && verb == 2: // kill
+		m.status = (&m).killSelected()
+	case !running && verb == 2: // remove
+		m.status = (&m).removeSelected()
 	}
 	return m, nil
 }
@@ -153,6 +258,98 @@ func (m *model) killSelected() string {
 	}
 	e.state = "killed"
 	return e.name + ": egress flushed"
+}
+
+// stopSelected stops (tears down) the running engagement. Demo cards are removed
+// in-memory; live ones Down the driver + forget the record, then reload.
+func (m *model) stopSelected() (tea.Cmd, string) {
+	if len(m.engs) == 0 {
+		return nil, ""
+	}
+	e := m.engs[m.sel]
+	if m.stateOf(e) != "running" {
+		return nil, e.name + ": not running"
+	}
+	if e.demo {
+		name := e.name
+		m.removeCard(m.sel)
+		return nil, name + ": stopped (demo)"
+	}
+	name, drv := e.name, e.driver
+	return func() tea.Msg {
+		if d, err := driver.Get(nbmodel.Driver(drv)); err == nil {
+			_ = d.Down(name)
+		}
+		_ = store.Delete(name)
+		return reloadMsg{}
+	}, name + ": stopping…"
+}
+
+// execSelected attaches an interactive shell by suspending the TUI and running
+// `nullbox shell <name>` (which itself calls the driver's Shell).
+func (m *model) execSelected() tea.Cmd {
+	if len(m.engs) == 0 {
+		return nil
+	}
+	e := m.engs[m.sel]
+	if e.demo {
+		m.status = e.name + ": exec would attach a shell (demo)"
+		return nil
+	}
+	self, err := os.Executable()
+	if err != nil {
+		self = "nullbox"
+	}
+	c := exec.Command(self, "shell", e.name)
+	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err} })
+}
+
+// removeSelected forgets a non-running engagement.
+func (m *model) removeSelected() string {
+	if len(m.engs) == 0 {
+		return ""
+	}
+	e := m.engs[m.sel]
+	if !e.demo {
+		_ = store.Delete(e.name)
+	}
+	m.removeCard(m.sel)
+	return e.name + ": removed"
+}
+
+func (m *model) removeCard(i int) {
+	m.engs = append(m.engs[:i], m.engs[i+1:]...)
+	if m.sel >= len(m.engs) && m.sel > 0 {
+		m.sel--
+	}
+}
+
+// reload rebuilds the engagement list from the store, preserving feeds by name.
+func (m *model) reload() {
+	recs, _ := store.List()
+	old := map[string]engagement{}
+	for _, e := range m.engs {
+		old[e.name] = e
+	}
+	var engs []engagement
+	for _, r := range recs {
+		e := fromRecord(r)
+		if o, ok := old[e.name]; ok {
+			e.feed = o.feed
+		}
+		engs = append(engs, e)
+	}
+	m.engs = engs
+	m.demo = false
+	if m.sel >= len(m.engs) {
+		m.sel = 0
+		if len(m.engs) > 0 {
+			m.sel = len(m.engs) - 1
+		}
+	}
+	for i := range m.engs {
+		seedFeed(&m.engs[i])
+	}
 }
 
 func (m model) stateOf(e engagement) string {

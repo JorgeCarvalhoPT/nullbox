@@ -43,6 +43,12 @@ func clampw(n int) int {
 func cell(s string, w int) string { return lipgloss.NewStyle().Width(clampw(w)).Render(s) }
 
 func (m model) View() string {
+	if m.mode == modeForm {
+		return m.formView()
+	}
+	if m.mode == modeConfirm {
+		return m.confirmView()
+	}
 	st := m.st
 	w := m.w
 	if w < 92 {
@@ -73,7 +79,7 @@ func (m model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.renderList(leftW), "  ", m.renderPane(rightW))
 
 	key := func(k, label string) string { return ink.Bold(true).Render(k) + " " + muted.Render(label) }
-	keys := strings.Join([]string{key("↑↓", "select"), key("e", "egress"), key("s", "scope"), key("k", "kill"), key("q", "quit")}, "   ")
+	keys := strings.Join([]string{key("↑↓", "select"), key("n", "new"), key("x", "exec"), key("d", "stop"), key("k", "kill"), key("q", "quit")}, "   ")
 	if m.status != "" {
 		keys = key("↑↓", "select") + "   " + st.fg(st.yellow).Render(m.status)
 	}
