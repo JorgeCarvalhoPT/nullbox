@@ -15,7 +15,7 @@ func demoEngagements() []engagement {
 	return []engagement{
 		{
 			name: "acme-internal", client: "ACME Corp", driver: "firecracker", profile: "routed", state: "running",
-			authRef: "SOW-2026-0142", windowEnd: day(9), image: "nullbox/smith:full",
+			authRef: "SOW-2026-0142", windowEnd: day(9), image: "nullbox/guest:full",
 			workspace: "/Users/op/engagements/acme/internal", res: "12%/4c · 6.2GB · routed · 8d 21h",
 			scope: []scopeEntry{{"10.10.0.0/16", "allow"}, {"10.20.5.0/24:443,8443", "allow"},
 				{"portal.acme.example", "allow"}, {"10.10.9.0/24", "deny"}},
@@ -24,7 +24,7 @@ func demoEngagements() []engagement {
 		},
 		{
 			name: "acme-web", client: "ACME Corp", driver: "krun", profile: "nat", state: "running",
-			authRef: "SOW-2026-0143", windowEnd: day(5), image: "nullbox/smith:thin",
+			authRef: "SOW-2026-0143", windowEnd: day(5), image: "nullbox/guest:thin",
 			workspace: "/Users/op/engagements/acme/web", res: "4%/2c · 1.9GB · nat · 4d 06h",
 			scope: []scopeEntry{{"app.acme.example", "allow"}, {"*.staging.acme.example", "allow"}},
 			dsts:  []string{"app.acme.example:443", "api.staging.acme.example:443"},
@@ -32,7 +32,7 @@ func demoEngagements() []engagement {
 		},
 		{
 			name: "beta-scan", client: "Beta LLC", driver: "firecracker", profile: "routed", state: "killed",
-			authRef: "SOW-2026-0130", windowEnd: day(-1), image: "nullbox/smith:full",
+			authRef: "SOW-2026-0130", windowEnd: day(-1), image: "nullbox/guest:full",
 			workspace: "/Users/op/engagements/beta/scan", res: "stopped",
 			scope: []scopeEntry{{"198.51.100.0/24", "allow"}},
 			dsts:  []string{"198.51.100.4"}, outs: []string{"198.51.100.250"}, demo: true,

@@ -118,7 +118,7 @@ func (m model) renderCard(e engagement, active bool, w int) string {
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		head,
-		muted.Render("agent-smith · Claude Code"),
+		muted.Render("AI pentest agent"),
 		faint.Render(truncate(e.workspace, inner)),
 		stat,
 		"",

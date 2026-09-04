@@ -64,9 +64,13 @@ type Authorization struct {
 }
 
 type Spec struct {
-	Driver       Driver       `yaml:"driver,omitempty"` // optional pin; empty => auto
-	Window       Window       `yaml:"window"`           // egress auto-expires at end
-	Scope        Scope        `yaml:"scope"`            // the allow/deny list = authorization
+	Driver Driver `yaml:"driver,omitempty"` // optional pin; empty => auto
+	// Image is the guest OCI image — ANY AI pentesting agent. nullbox is
+	// agent-agnostic: the sandbox does not care what runs inside. Empty => a
+	// built-in default guest chosen from Capabilities.InfraTools.
+	Image        string       `yaml:"image,omitempty"`
+	Window       Window       `yaml:"window"` // egress auto-expires at end
+	Scope        Scope        `yaml:"scope"`  // the allow/deny list = authorization
 	Network      Network      `yaml:"network"`
 	Capabilities Capabilities `yaml:"capabilities"`
 	Workspace    string       `yaml:"workspace,omitempty"` // host path mounted as the target codebase

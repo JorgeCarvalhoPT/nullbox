@@ -41,7 +41,7 @@ func TestInitialViewRenders(t *testing.T) {
 		t.Fatalf("expected 3 demo engagements, got %d", len(m.engs))
 	}
 	v := strip(m.View())
-	for _, want := range []string{"nullbox", "acme-internal", "microVM", "agent-smith · Claude Code", "Egress Log", "Scope Rules", "Last seen", "Destination", "Allowed"} {
+	for _, want := range []string{"nullbox", "acme-internal", "microVM", "AI pentest agent", "Egress Log", "Scope Rules", "Last seen", "Destination", "Allowed"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q", want)
 		}

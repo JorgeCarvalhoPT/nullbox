@@ -1,4 +1,4 @@
-// Command nullbox provisions Smith-native pentest sandboxes from an Engagement
+// Command nullbox provisions pentest sandboxes for AI agents from an Engagement
 // manifest ("scope as code"). See the package READMEs for the architecture.
 //
 // Phase 0 commands that work anywhere, no host VMM required:
@@ -9,7 +9,7 @@
 // Commands that dispatch to a VMM driver (need a host with the backend):
 //
 //	nullbox up    <manifest>      provision + start the engagement sandbox
-//	nullbox shell <manifest>      attach an interactive Claude session
+//	nullbox shell <manifest>      attach an interactive shell in the sandbox
 //	nullbox kill  <manifest>      flush the egress policy immediately (panic button)
 //	nullbox down  <manifest>      stop + remove the sandbox
 //	nullbox list                  show known engagements
@@ -36,7 +36,7 @@ import (
 	"github.com/JorgeCarvalhoPT/nullbox/internal/tui"
 )
 
-const usage = `nullbox — Smith-native pentest sandbox (scope as code)
+const usage = `nullbox — a sandbox for AI pentesting agents (scope as code)
 
 usage: nullbox [command] [args]
        nullbox                 launch the in-terminal interface (TUI)
@@ -45,7 +45,7 @@ usage: nullbox [command] [args]
   validate <manifest>   parse + validate a manifest, print a summary
   render   <manifest>   compile a manifest to its nftables egress policy (stdout)
   up       <manifest>   provision + start the engagement sandbox (records it)
-  shell    <name>       attach an interactive Claude session
+  shell    <name>       attach an interactive shell in the sandbox
   kill     <name>       flush the egress policy immediately (panic button)
   down     <name>       stop + remove the sandbox
   list                  show known engagements
@@ -259,15 +259,19 @@ func cmdList(_ []string) error {
 	return nil
 }
 
-// imageRef selects the guest OCI image variant. The full variant carries the
-// Kali infra domain (masscan, netexec, responder, arp-scan…) for routed/l2
-// engagements; thin is web+codebase only. Registry path is a placeholder to be
-// finalized when the image build publishes.
+// imageRef resolves the guest OCI image — ANY AI pentesting agent. If the
+// manifest names one (spec.image), it wins; nullbox does not care which agent
+// runs inside. Otherwise a built-in default guest is chosen by infraTools: the
+// full variant carries the Kali infra domain (masscan, netexec, responder…) for
+// routed/l2, thin is web + codebase only.
 func imageRef(e *model.Engagement) string {
-	if e.Spec.Capabilities.InfraTools {
-		return "nullbox/smith:full"
+	if e.Spec.Image != "" {
+		return e.Spec.Image
 	}
-	return "nullbox/smith:thin"
+	if e.Spec.Capabilities.InfraTools {
+		return "nullbox/guest:full"
+	}
+	return "nullbox/guest:thin"
 }
 
 // scopeEntries renders the manifest's allow/deny targets for display in the

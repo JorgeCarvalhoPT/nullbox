@@ -17,7 +17,7 @@ import (
 type UpSpec struct {
 	Engagement *model.Engagement
 	Ruleset    *policy.Ruleset // compiled egress policy
-	ImageRef   string          // OCI image for the Smith guest (thin or full variant)
+	ImageRef   string          // OCI image for the agent guest (any AI pentesting agent)
 	Workspace  string          // host path mounted read-only as the target codebase
 }
 

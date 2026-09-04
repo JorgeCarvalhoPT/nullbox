@@ -169,19 +169,19 @@
 
   const DEMO = [
     { name:"acme-internal", client:"ACME Corp", driver:"firecracker", profile:"routed", state:"running",
-      authRef:"SOW-2026-0142", windowEnd:days(9), image:"nullbox/smith:full",
+      authRef:"SOW-2026-0142", windowEnd:days(9), image:"nullbox/guest:full",
       workspace:"/Users/op/engagements/acme/internal", res:"12%/4c · 6.2GB · routed · 8d 21h",
       scope:[{target:"10.10.0.0/16",kind:"allow"},{target:"10.20.5.0/24:443,8443",kind:"allow"},
              {target:"portal.acme.example",kind:"allow"},{target:"10.10.9.0/24",kind:"deny"}],
       dsts:["10.10.1.14","10.10.4.9","10.20.5.7:443","10.10.22.3","portal.acme.example:443"],
       outs:["10.10.9.12","8.8.8.8","169.254.169.254"] },
     { name:"acme-web", client:"ACME Corp", driver:"krun", profile:"nat", state:"running",
-      authRef:"SOW-2026-0143", windowEnd:days(5), image:"nullbox/smith:thin",
+      authRef:"SOW-2026-0143", windowEnd:days(5), image:"nullbox/guest:thin",
       workspace:"/Users/op/engagements/acme/web", res:"4%/2c · 1.9GB · nat · 4d 06h",
       scope:[{target:"app.acme.example",kind:"allow"},{target:"*.staging.acme.example",kind:"allow"}],
       dsts:["app.acme.example:443","api.staging.acme.example:443"], outs:["cdn.evil.example:443"] },
     { name:"beta-scan", client:"Beta LLC", driver:"firecracker", profile:"routed", state:"killed",
-      authRef:"SOW-2026-0130", windowEnd:days(-1), image:"nullbox/smith:full",
+      authRef:"SOW-2026-0130", windowEnd:days(-1), image:"nullbox/guest:full",
       workspace:"/Users/op/engagements/beta/scan", res:"stopped",
       scope:[{target:"198.51.100.0/24",kind:"allow"}], dsts:["198.51.100.4"], outs:["198.51.100.250"] }
   ];
@@ -235,7 +235,7 @@
       cn.append(el("span","gl "+st,glyph(st)), el("span",null,e.name));
       if(e.name===active) cn.append(el("span","check","✓"));
       c.append(cn);
-      c.append(el("div","agent","agent-smith · Claude Code"));
+      c.append(el("div","agent","AI pentest agent"));
       c.append(el("div","path",e.workspace||""));
       c.append(el("div","res", st==="running"? (e.res||"") : (st==="killed"?"killed":"expired") ));
       const acts=el("div","acts");
