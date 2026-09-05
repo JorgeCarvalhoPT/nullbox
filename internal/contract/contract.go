@@ -1,8 +1,13 @@
-// Package contract generates the AI agent's environment contract — the
-// ~/.claude/CLAUDE.md text — from the same Engagement manifest that
-// policy.Compile turns into the nftables rules. policy renders the manifest to
-// the ENFORCED egress rules; contract renders it to the DESCRIBED capabilities
-// the agent reads at startup. Two views of one authorization record.
+// Package contract generates the AI agent's environment contract from the same
+// Engagement manifest that policy.Compile turns into the nftables rules. policy
+// renders the manifest to the ENFORCED egress rules; contract renders it to the
+// DESCRIBED capabilities the agent reads at startup. Two views of one
+// authorization record.
+//
+// The same contract text is written under several filenames so it is picked up
+// regardless of which agent runs in the guest: Claude Code reads CLAUDE.md,
+// while Codex, OpenCode, and pi read AGENTS.md (the cross-agent standard). See
+// ContractFiles.
 //
 // Stdlib only, so it is offline/hardware-free testable like model and policy.
 package contract
@@ -17,7 +22,26 @@ import (
 	"github.com/JorgeCarvalhoPT/nullbox/internal/model"
 )
 
-// Filename is the guest-relative path the contract is written to.
+// ContractFile is one guest-relative path the contract is materialized at, plus
+// the agent convention it serves. The SAME descriptive content goes to every
+// path; each agent reads whichever file its own convention names.
+type ContractFile struct {
+	Path  string // guest-relative (slash-separated)
+	Agent string // which agent reads it (documentation only)
+}
+
+// ContractFiles are the per-agent contract locations WriteInto materializes.
+// AGENTS.md is the cross-agent standard (agents.md) that Codex, OpenCode, and pi
+// read; the CLAUDE.md variants serve Claude Code. Add an entry here to support
+// another agent's convention — the content is identical, only the path differs.
+var ContractFiles = []ContractFile{
+	{Path: ".claude/CLAUDE.md", Agent: "Claude Code"},
+	{Path: "CLAUDE.md", Agent: "Claude Code / OpenCode (project root)"},
+	{Path: "AGENTS.md", Agent: "Codex, OpenCode, pi (AGENTS.md standard)"},
+	{Path: ".codex/AGENTS.md", Agent: "Codex (global config dir)"},
+}
+
+// Filename is the primary (Claude Code) contract path, kept for compatibility.
 const Filename = ".claude/CLAUDE.md"
 
 // Generate renders the environment contract for an engagement. Pure, no I/O.
@@ -75,10 +99,15 @@ func writeProfileSection(w func(string, ...any), p model.Profile) {
 		w("WORKS: nmap -sT, curl and any TCP client; UDP to in-scope hosts and ICMP")
 		w("  echo (ping). Good for /web-exploit, /api-security, /ssl-tls-audit,")
 		w("  /oauth-security, /codebase.")
+		w("PORT DISCOVERY: use CONNECT-mode scanners — nmap -sT, naabu -s connect, or")
+		w("  rustscan. Raw mass scanners (masscan, nmap -sS) do NOT work on nat.")
 		w("BLOCKED: raw sockets — SYN/half-open (nmap -sS), ACK/FIN/Xmas, hping3,")
 		w("  scapy (user-mode NAT presents sockets, not a TAP — use nmap -sT);")
 		w("  arp-scan, Responder, mitm6 (no broadcast segment).")
 		w("A blocked raw-socket technique here is a PROFILE limit, not a target result.")
+		w("ENFORCEMENT: scope filters only on a real-netdev datapath (Linux, or macOS")
+		w("  with gvproxy). Under macOS TSI the scope is DESCRIPTIVE ONLY — a dev/demo")
+		w("  sandbox, not a contained engagement.")
 	case model.ProfileRouted:
 		w("WORKS: full L3/L4 raw to the in-scope CIDRs — nmap -sS/-sU/-sA/-sX, ICMP")
 		w("  sweeps, masscan, hping3, raw UDP probes.")
@@ -177,16 +206,22 @@ func orNone(s string) string {
 	return s
 }
 
-// WriteInto materializes the contract at <guestHome>/.claude/CLAUDE.md and
-// returns the path. The driver's booter calls this while staging the guest.
-func WriteInto(guestHome string, e *model.Engagement) (string, error) {
-	dir := filepath.Join(guestHome, ".claude")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+// WriteInto materializes the contract under guestHome once per supported agent
+// convention (see ContractFiles) and returns the paths written, so the same
+// scope briefing is picked up whether the guest runs Claude Code, Codex,
+// OpenCode, or pi. The driver's booter calls this while staging the guest.
+func WriteInto(guestHome string, e *model.Engagement) ([]string, error) {
+	content := []byte(Generate(e))
+	written := make([]string, 0, len(ContractFiles))
+	for _, f := range ContractFiles {
+		path := filepath.Join(guestHome, filepath.FromSlash(f.Path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return written, err
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			return written, err
+		}
+		written = append(written, path)
 	}
-	path := filepath.Join(dir, "CLAUDE.md")
-	if err := os.WriteFile(path, []byte(Generate(e)), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
+	return written, nil
 }

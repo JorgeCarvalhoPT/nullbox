@@ -13,7 +13,7 @@ import (
 )
 
 func TestKrunCreateArgs(t *testing.T) {
-	got := krunCreateArgs("nbx-acme", "nullbox/guest:thin", "/ws", "/cfg", 7788, 2, 2048)
+	got := krunCreateArgs("nbx-acme", "nullbox/guest:thin", "/ws", "/cfg", 7788, 2, 2048, netPasst)
 	want := "create --name nbx-acme --cpus 2 --mem 2048 --volume /cfg:/etc/nullbox --volume /ws:/workspace --workdir /workspace --port 7788:7788 nullbox/guest:thin"
 	if strings.Join(got, " ") != want {
 		t.Errorf("createArgs =\n %q\nwant\n %q", strings.Join(got, " "), want)
@@ -21,13 +21,82 @@ func TestKrunCreateArgs(t *testing.T) {
 }
 
 func TestKrunCreateArgsMinimal(t *testing.T) {
-	got := krunCreateArgs("nbx-x", "img", "", "/cfg", 0, 2, 2048)
+	got := krunCreateArgs("nbx-x", "img", "", "/cfg", 0, 2, 2048, netTSI)
 	j := strings.Join(got, " ")
 	if strings.Contains(j, "--workdir") || strings.Contains(j, "--port") {
 		t.Errorf("no workspace/port should omit those flags: %v", got)
 	}
 	if got[len(got)-1] != "img" {
 		t.Errorf("image must be last arg: %v", got)
+	}
+}
+
+func TestKrunCreateArgsGvproxy(t *testing.T) {
+	got := krunCreateArgs("nbx-x", "img", "", "/cfg", 0, 2, 2048, netGvproxy)
+	j := strings.Join(got, " ")
+	if !strings.Contains(j, "--net gvproxy") {
+		t.Errorf("gvproxy backend should add net args: %v", got)
+	}
+	if got[len(got)-1] != "img" {
+		t.Errorf("image must still be last arg: %v", got)
+	}
+}
+
+func TestDetectKrunNet(t *testing.T) {
+	// Linux => passt (real netdev), enforced.
+	if n := detectKrunNet("linux", func(string) (string, error) { return "", os.ErrNotExist }); n != netPasst || !n.enforced() {
+		t.Errorf("linux => %q enforced=%v, want passt/true", n, n.enforced())
+	}
+	// macOS without gvproxy => TSI, NOT enforced.
+	if n := detectKrunNet("darwin", func(string) (string, error) { return "", os.ErrNotExist }); n != netTSI || n.enforced() {
+		t.Errorf("darwin no-gvproxy => %q enforced=%v, want tsi/false", n, n.enforced())
+	}
+	// macOS with gvproxy => gvproxy, enforced.
+	if n := detectKrunNet("darwin", func(string) (string, error) { return "/opt/bin/gvproxy", nil }); n != netGvproxy || !n.enforced() {
+		t.Errorf("darwin gvproxy => %q enforced=%v, want gvproxy/true", n, n.enforced())
+	}
+}
+
+func TestKrunNetArgsOverride(t *testing.T) {
+	if len(krunNetArgs(netTSI)) != 0 || len(krunNetArgs(netPasst)) != 0 {
+		t.Error("tsi/passt need no extra args")
+	}
+	t.Setenv(envGvproxyArgs, "--gpu none --net foo")
+	if got := strings.Join(krunNetArgs(netGvproxy), " "); got != "--gpu none --net foo" {
+		t.Errorf("override not honored: %q", got)
+	}
+}
+
+func TestCheckEnforcementGate(t *testing.T) {
+	// Unenforced backend (TSI) is refused by default...
+	d := &krunDriver{net: func() krunNet { return netTSI }}
+	if err := d.checkEnforcement(); err == nil {
+		t.Error("TSI must be refused without opt-in")
+	}
+	// ...but allowed with the explicit opt-in...
+	t.Setenv(envAllowUnenforced, "1")
+	if err := d.checkEnforcement(); err != nil {
+		t.Errorf("opt-in should permit unenforced: %v", err)
+	}
+	// ...and an enforcing backend always passes.
+	t.Setenv(envAllowUnenforced, "")
+	de := &krunDriver{net: func() krunNet { return netGvproxy }}
+	if err := de.checkEnforcement(); err != nil {
+		t.Errorf("gvproxy should pass: %v", err)
+	}
+}
+
+func TestKrunBootstrap(t *testing.T) {
+	enforced := krunBootstrap(netGvproxy)
+	if !strings.Contains(enforced, "nft -f /etc/nullbox/policy.nft") || !strings.Contains(enforced, "ENFORCED") {
+		t.Errorf("enforced bootstrap wrong:\n%s", enforced)
+	}
+	if !strings.Contains(enforced, "exec \"$@\"") {
+		t.Error("bootstrap must exec the agent")
+	}
+	dev := krunBootstrap(netTSI)
+	if !strings.Contains(dev, "NOT enforced") {
+		t.Errorf("tsi bootstrap must warn it is unenforced:\n%s", dev)
 	}
 }
 
@@ -81,6 +150,7 @@ func TestKrunUpThroughSeams(t *testing.T) {
 		resolve: func(host string) ([]netip.Addr, error) {
 			return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
 		},
+		net: func() krunNet { return netGvproxy }, // enforcing datapath so Preflight admits it
 	}
 	e := &model.Engagement{
 		Metadata: model.Metadata{Name: "acme"},
@@ -114,6 +184,11 @@ func TestKrunUpThroughSeams(t *testing.T) {
 	data, err := os.ReadFile(bundle)
 	if err != nil || !strings.Contains(string(data), "93.184.216.34") {
 		t.Errorf("policy bundle missing resolved host addr: %v", err)
+	}
+	// the guest bootstrap that applies the policy was staged too
+	boot, err := os.ReadFile(filepath.Join(krunRunDir(), "acme", "bootstrap.sh"))
+	if err != nil || !strings.Contains(string(boot), "nft -f /etc/nullbox/policy.nft") {
+		t.Errorf("bootstrap.sh not staged: %v", err)
 	}
 }
 

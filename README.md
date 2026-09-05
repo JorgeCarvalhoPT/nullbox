@@ -172,6 +172,13 @@ when their destination is in scope, and everything else is dropped and logged.
   truth and the authorization record; `window.end` auto-expires egress, so scope
   cannot outlive its authorization.
 
+The same scope briefing is staged into the guest under each agent's own
+convention — Claude Code reads `CLAUDE.md`, while Codex, OpenCode, and pi read
+`AGENTS.md` (the cross-agent standard) — so whichever agent you run reads its
+limits at startup. The list lives in `contract.ContractFiles`; add an entry to
+support another agent. Only the descriptive briefing is written; MCP servers and
+agent settings come from your image.
+
 ## The manifest is the scope
 
 One YAML file is the single source of truth and the authorization record.
@@ -330,9 +337,28 @@ same way. Templates live under `NULLBOX_TEMPLATES` (default
 
 | Profile | Gives you | Host |
 |---|---|---|
-| `nat` | routed TCP/UDP/ICMP-echo | macOS + Linux laptop (krun) |
+| `nat` | connect-mode TCP/UDP/ICMP-echo | macOS + Linux laptop (krun) |
 | `routed` | full raw sockets / UDP / ICMP to CIDRs | Linux host (Firecracker) |
 | `l2` | broadcast domain (arp-scan / Responder / mitm6) | Linux host on the target segment |
+
+On `nat`, use connect-mode scanners for discovery (`nmap -sT`, `naabu -s connect`,
+`rustscan`). Raw mass scanners (`masscan`, `nmap -sS`) need the `routed` profile
+on Linux.
+
+### Enforcement on macOS
+
+Scope is only enforced on a real-netdev datapath. On Linux the krun guest gets
+one by default (passt). On macOS, plain libkrun uses TSI (socket impersonation),
+which bypasses the guest IP stack, so the in-guest firewall cannot filter
+external traffic. nullbox does not pretend otherwise: on macOS it **refuses to
+boot an unenforced sandbox by default**. To run an enforced engagement on a Mac,
+install `gvproxy` (from `containers/gvisor-tap-vsock`, or bundled with podman) so
+the guest gets a filterable virtio-net device. Override the krunvm networking
+flag for your build with `NULLBOX_KRUN_NET_ARGS` if needed.
+
+For a deliberately unscoped dev/demo box, set `NULLBOX_ALLOW_UNENFORCED=1` and
+nullbox will boot with a loud warning. Fully raw, enforced engagements belong on
+the Firecracker (Linux/KVM) path.
 
 ## Quickstart
 
@@ -357,7 +383,7 @@ internal/template/   reusable config presets
 internal/store/      engagement registry (name-based lifecycle)
 internal/engage/     up/run orchestration + target parsing
 internal/driver/     VMM abstraction: krun, firecracker, clh/kata stubs
-internal/contract/   capability-contract generator for the guest
+internal/contract/   capability contract for the guest (CLAUDE.md + AGENTS.md)
 internal/toolrunner/ sibling tool runner (K8s Jobs / scoped containers)
 internal/nflog/      NFLOG netlink reader (egress event feed)
 internal/tui/        in-terminal UI (bubbletea + lipgloss)
@@ -404,3 +430,7 @@ Implemented, verified only on real hardware:
 - The `l2` profile on a bridge/netdev-family table — the inet `forward` hook does
   not see bridged L2 frames, so l2 filtering needs a bridge table (and a host on
   the target segment).
+- macOS enforced datapath: confirm the exact krunvm↔gvproxy wiring on a Mac (the
+  detection, the enforcement gate, the in-guest bootstrap, and the
+  `NULLBOX_KRUN_NET_ARGS` override are built and unit-tested; the live boot that
+  proves an out-of-scope connection is dropped is the hardware step).

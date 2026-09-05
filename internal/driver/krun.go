@@ -46,13 +46,15 @@ func defaultDriver(p model.Profile) model.Driver {
 // the dashboard port.
 //
 // SECURITY NOTE, stated honestly: there is NO host TAP or host nftables on the
-// krun path, so scope cannot be enforced host-side. The guest init applies the
-// SAME compiled policy in-guest (`nft -f /etc/nullbox/policy.nft`). That only
-// filters egress on a real-netdev datapath (Linux/passt). On macOS libkrun uses
-// TSI (socket impersonation), which bypasses the guest IP stack — so in-guest
-// nft does NOT filter external traffic there. Treat macOS/krun as a dev/demo
-// sandbox (process/fs/kernel isolation only); enforced engagements belong on the
-// firecracker (Linux) path, which is why routed/l2 redirect there.
+// krun path, so scope cannot be enforced host-side. Instead the guest bootstrap
+// applies the SAME compiled policy in-guest (`nft -f /etc/nullbox/policy.nft`),
+// which filters egress ONLY on a real-netdev datapath: Linux (passt) or macOS
+// with gvproxy. Plain macOS libkrun uses TSI (socket impersonation), which
+// bypasses the guest IP stack, so in-guest nft does NOT filter external traffic
+// there. Rather than pretend, Preflight now REFUSES to run unenforced by default
+// (a security sandbox must not silently fail to contain): install gvproxy for an
+// enforced datapath, run the firecracker (Linux) path, or set
+// NULLBOX_ALLOW_UNENFORCED=1 to opt into an explicitly unscoped dev/demo sandbox.
 // ---------------------------------------------------------------------------
 
 const (
@@ -62,17 +64,73 @@ const (
 	krunDefaultMemMiB      = 2048
 	krunPolicyGuestPath    = "/etc/nullbox"
 	krunWorkspaceGuestPath = "/workspace"
+
+	// envAllowUnenforced opts into running with a non-enforcing datapath (macOS
+	// TSI). Without it, Preflight refuses rather than run unscoped.
+	envAllowUnenforced = "NULLBOX_ALLOW_UNENFORCED"
+	// envGvproxyArgs overrides the krunvm networking args used to attach gvproxy,
+	// for krunvm builds whose flag differs. Space-separated.
+	envGvproxyArgs = "NULLBOX_KRUN_NET_ARGS"
 )
+
+// krunNet is the guest networking backend. Only a real-netdev backend lets the
+// in-guest policy actually filter egress; TSI does not.
+type krunNet string
+
+const (
+	netTSI     krunNet = "tsi"     // macOS socket impersonation: guest IP stack bypassed, NOT enforceable
+	netPasst   krunNet = "passt"   // Linux real virtio-net: in-guest nft filters
+	netGvproxy krunNet = "gvproxy" // macOS real virtio-net via gvproxy: in-guest nft filters
+)
+
+// enforced reports whether this backend gives the guest a real IP stack, so the
+// compiled policy applied in-guest actually filters egress.
+func (n krunNet) enforced() bool { return n == netPasst || n == netGvproxy }
+
+// detectKrunNet picks the networking backend for this host. Linux krunvm gets a
+// real netdev (passt) by default; macOS defaults to TSI unless gvproxy is
+// installed, which provides a filterable virtio-net device.
+func detectKrunNet(goos string, look func(string) (string, error)) krunNet {
+	if goos != "darwin" {
+		return netPasst
+	}
+	if _, err := look("gvproxy"); err == nil {
+		return netGvproxy
+	}
+	return netTSI
+}
+
+// krunNetArgs returns the extra krunvm create args to attach the backend's
+// datapath. gvproxy wiring is krunvm-build-specific, so the default is
+// overridable via NULLBOX_KRUN_NET_ARGS; tsi/passt need nothing.
+func krunNetArgs(n krunNet) []string {
+	if n != netGvproxy {
+		return nil
+	}
+	if v := strings.TrimSpace(os.Getenv(envGvproxyArgs)); v != "" {
+		return strings.Fields(v)
+	}
+	return []string{"--net", "gvproxy"}
+}
 
 type krunDriver struct {
 	run     func(*exec.Cmd) ([]byte, error)      // nil => real CombinedOutput
 	startVM func(vm, logDir string) (int, error) // nil => real startDetached
 	resolve policy.Resolver                      // nil => krunResolver
+	net     func() krunNet                       // nil => detectKrunNet(runtime.GOOS, exec.LookPath)
 }
 
 func (*krunDriver) Name() model.Driver { return model.DriverKrun }
 
-func (*krunDriver) Preflight(profile model.Profile) error {
+// backend resolves the networking backend for this host (seam for tests).
+func (d *krunDriver) backend() krunNet {
+	if d.net != nil {
+		return d.net()
+	}
+	return detectKrunNet(runtime.GOOS, exec.LookPath)
+}
+
+func (d *krunDriver) Preflight(profile model.Profile) error {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		return fmt.Errorf("krun driver supports macOS and Linux only, not %s", runtime.GOOS)
 	}
@@ -82,13 +140,35 @@ func (*krunDriver) Preflight(profile model.Profile) error {
 	}
 	switch profile {
 	case model.ProfileNAT:
-		return nil
+		return d.checkEnforcement()
 	case model.ProfileRouted, model.ProfileL2:
 		return fmt.Errorf("profile %q needs raw-socket/L2 networking which the krun "+
 			"(user-mode) path cannot provide; use driver: firecracker on a Linux host", profile)
 	default:
 		return fmt.Errorf("unknown profile %q", profile)
 	}
+}
+
+// checkEnforcement refuses to bring an engagement up on a datapath that cannot
+// enforce scope, so nullbox never silently fails to contain. macOS without
+// gvproxy uses TSI, which bypasses the in-guest firewall; the operator must
+// install gvproxy, use the Linux firecracker path, or explicitly opt into an
+// unscoped dev sandbox.
+func (d *krunDriver) checkEnforcement() error {
+	if d.backend().enforced() {
+		return nil
+	}
+	if os.Getenv(envAllowUnenforced) != "" {
+		fmt.Fprintln(os.Stderr, "nullbox: WARNING — egress is NOT enforced on this host "+
+			"(macOS/TSI datapath). Scope is descriptive only; this is a dev/demo sandbox, "+
+			"not a contained engagement.")
+		return nil
+	}
+	return errors.New("egress cannot be enforced on this host: macOS libkrun uses TSI, " +
+		"which bypasses the in-guest firewall. Install gvproxy for a filterable datapath " +
+		"(from containers/gvisor-tap-vsock, or bundled with podman), run an enforced " +
+		"engagement on the firecracker (Linux) path, or set " + envAllowUnenforced +
+		"=1 to run an explicitly UNSCOPED dev/demo sandbox")
 }
 
 func (d *krunDriver) Up(spec UpSpec) (*Status, error) {
@@ -107,7 +187,7 @@ func (d *krunDriver) Up(spec UpSpec) (*Status, error) {
 		return nil, fmt.Errorf("allocate dashboard port: %w", err)
 	}
 	_, _ = d.exec("krunvm", "delete", vm) // best-effort stale clear
-	if out, err := d.exec("krunvm", krunCreateArgs(vm, spec.ImageRef, spec.Workspace, cfg, port, krunDefaultCPUs, krunDefaultMemMiB)...); err != nil {
+	if out, err := d.exec("krunvm", krunCreateArgs(vm, spec.ImageRef, spec.Workspace, cfg, port, krunDefaultCPUs, krunDefaultMemMiB, d.backend())...); err != nil {
 		return nil, fmt.Errorf("krunvm create: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	pid, err := d.start(vm, cfg)
@@ -183,9 +263,10 @@ func (d *krunDriver) resolver() policy.Resolver {
 
 func krunVMName(n string) string { return krunNamePrefix + n }
 
-func krunCreateArgs(name, image, workspace, cfgDir string, hostPort, cpus, mem int) []string {
+func krunCreateArgs(name, image, workspace, cfgDir string, hostPort, cpus, mem int, net krunNet) []string {
 	a := []string{"create", "--name", name, "--cpus", strconv.Itoa(cpus), "--mem", strconv.Itoa(mem),
 		"--volume", cfgDir + ":" + krunPolicyGuestPath}
+	a = append(a, krunNetArgs(net)...)
 	if workspace != "" {
 		a = append(a, "--volume", workspace+":"+krunWorkspaceGuestPath, "--workdir", krunWorkspaceGuestPath)
 	}
@@ -238,7 +319,35 @@ func (d *krunDriver) writePolicyBundle(spec UpSpec) (string, error) {
 	if _, err := contract.WriteInto(dir, spec.Engagement); err != nil {
 		fmt.Fprintf(os.Stderr, "nullbox: contract: %v\n", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "bootstrap.sh"), []byte(krunBootstrap(d.backend())), 0o755); err != nil {
+		return "", err
+	}
 	return dir, nil
+}
+
+// krunBootstrap is the guest bootstrap script staged at /etc/nullbox/bootstrap.sh.
+// A guest image runs it as its entrypoint (or execs it) to apply the compiled
+// egress policy inside the guest before handing off to the agent: it runs
+// `nft -f policy.nft`, reports whether egress is actually enforced on this
+// backend, then execs the agent command. Pure text, unit-tested.
+func krunBootstrap(net krunNet) string {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	b.WriteString("# nullbox guest bootstrap — applies the compiled egress policy, then execs the agent.\n")
+	b.WriteString("# Mounted read-only at /etc/nullbox/bootstrap.sh. Do not hand-edit.\n")
+	b.WriteString("set -e\n")
+	b.WriteString("if command -v nft >/dev/null 2>&1; then\n")
+	b.WriteString("  nft -f /etc/nullbox/policy.nft && echo \"nullbox: egress policy applied\" || echo \"nullbox: WARNING egress policy failed to apply\"\n")
+	b.WriteString("else\n")
+	b.WriteString("  echo \"nullbox: WARNING nft not present in guest image — egress NOT enforced in-guest\"\n")
+	b.WriteString("fi\n")
+	if net.enforced() {
+		fmt.Fprintf(&b, "echo \"nullbox: datapath=%s — scope is ENFORCED\"\n", net)
+	} else {
+		fmt.Fprintf(&b, "echo \"nullbox: datapath=%s — scope is NOT enforced (dev/demo); in-guest nft cannot filter TSI traffic\"\n", net)
+	}
+	b.WriteString("exec \"$@\"\n")
+	return b.String()
 }
 
 func krunResolver(host string) ([]netip.Addr, error) {

@@ -69,6 +69,8 @@ func TestNATProfile(t *testing.T) {
 	mustHave(t, s, "Responder")
 	mustHave(t, s, "mitm6")
 	mustHave(t, s, "PROFILE limit, not a target result")
+	mustHave(t, s, "naabu -s connect")
+	mustHave(t, s, "DESCRIPTIVE ONLY")
 }
 
 func TestRoutedProfile(t *testing.T) {
@@ -130,18 +132,26 @@ func TestTooling(t *testing.T) {
 
 func TestWriteInto(t *testing.T) {
 	home := t.TempDir()
-	path, err := WriteInto(home, eng(model.ProfileNAT, false))
+	paths, err := WriteInto(home, eng(model.ProfileNAT, false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != filepath.Join(home, ".claude", "CLAUDE.md") {
-		t.Errorf("unexpected path %q", path)
+	if len(paths) != len(ContractFiles) {
+		t.Fatalf("wrote %d files, want %d", len(paths), len(ContractFiles))
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	// Every supported agent convention must be materialized with the contract body.
+	for _, f := range ContractFiles {
+		p := filepath.Join(home, filepath.FromSlash(f.Path))
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("missing contract for %s at %s: %v", f.Agent, f.Path, err)
+		}
+		if !strings.Contains(string(data), "nullbox engagement contract") {
+			t.Errorf("%s: written file missing contract body", f.Path)
+		}
 	}
-	if !strings.Contains(string(data), "nullbox engagement contract") {
-		t.Errorf("written file missing contract body")
+	// The Claude Code path (Filename) must still be among them, for compatibility.
+	if _, err := os.Stat(filepath.Join(home, filepath.FromSlash(Filename))); err != nil {
+		t.Errorf("primary Claude path %s not written: %v", Filename, err)
 	}
 }
